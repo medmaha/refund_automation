@@ -46,14 +46,13 @@ def process_refund_automation():
                 "Refund processed successfully.",
                 extra={"refund_id": refund.id, "order_id": order.id},
             )
-            refunded_orders[refund.id] = refund
+            refunded_orders[refund.id] = refund.model_dump_json(indent=2)
         else:
             logger.warning("Refund not processed.", extra={"order_id": order.id})
 
 
     logger.info(
-        "Refund automation process completed.",
-        extra={"refunded_orders_count": len(refunded_orders)},
+        f"[Refunded] -> {refunded_orders.values()}",
     )
 
 

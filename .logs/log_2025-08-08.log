@@ -1,0 +1,6 @@
+2025-08-08 14:42:14,880 - src.shopify.orders - INFO - Starting retrieval of fulfilled Shopify orders
+2025-08-08 14:42:16,063 - src.shopify.orders - INFO - Fetched 10 orders from Shopify
+2025-08-08 14:42:16,065 - src.shopify.orders - INFO - Cleaning up 10 Shopify orders
+2025-08-08 14:42:16,066 - src.shopify.orders - INFO - Cleaned orders count: 0
+2025-08-08 14:42:16,066 - src.shopify.orders - INFO - No cleaned orders remain after filtering, returning empty tracking list
+2025-08-08 14:42:16,066 - src.shopify.refund - WARNING - No Tracking Data

@@ -40,35 +40,15 @@ jobs:
           SHOPIFY_STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
           SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
 
-      - name: Upload logs artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: refund-logs
-          path: .logs
+      # - name: Set up Git
+      #   run: |
+      #     git config --global user.name "github-actions[bot]"
+      #     git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-  commit:
-    runs-on: ubuntu-latest
-    needs: refund
-    name: Commit and Push Changes
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download logs artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: refund-logs
-          path: .logs
-      
-      - name: Set up Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Commit and push changes to main branch
-        run: |
-          git add .logs
-          git commit -m "Automated refund job: commit changes" || echo "No changes to commit"
-          git push origin HEAD:main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # - name: Commit and push changes to main branch
+      #   run: |
+      #     git add .
+      #     git commit -m "Automated refund job: commit changes" || echo "No changes to commit"
+      #     git push origin HEAD:main
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

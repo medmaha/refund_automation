@@ -1,8 +1,8 @@
 name: Refund Automation
 
 permissions:
-  contents: read
   packages: write
+  contents: write
 
 on:
   workflow_dispatch:

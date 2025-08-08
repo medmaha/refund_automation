@@ -53,10 +53,10 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Commit and push changes
+      - name: Commit and push changes to main branch
         run: |
           git add .
           git commit -m "Automated refund job: commit changes" || echo "No changes to commit"
-          git push
+          git push origin HEAD:main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

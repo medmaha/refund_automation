@@ -1,4 +1,5 @@
 import requests
+import sys
 
 from src.config import REQUEST_TIMEOUT, SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_URL
 from src.logger import get_logger
@@ -20,34 +21,35 @@ def process_refund_automation():
 
     trackings = retrieve_fulfilled_shopify_orders()
 
+    if not len(trackings):
+        logger.info("No Tracking Data", extra={"trackings": trackings})
+        return sys.exit(0)
+
     refunded_orders = {}
 
-    if trackings:
-        for idx, order_and_tracking in enumerate(trackings):
-            logger.info(f"Processing tracking {idx+1}/{len(trackings)}")
-            order, tracking = order_and_tracking
-            latest_event = tracking.track_info.latest_event
+    for idx, order_and_tracking in enumerate(trackings):
+        logger.info(f"Processing tracking {idx+1}/{len(trackings)}")
+        order, tracking = order_and_tracking
+        latest_event = tracking.track_info.latest_event
 
-            if not latest_event:
-                logger.warning(
-                    "No latest event found for tracking.", extra={"order_id": order.id}
-                )
-                continue
+        if not latest_event:
+            logger.warning(
+                "No latest event found for tracking.", extra={"order_id": order.id}
+            )
+            continue
 
-            # TODO: log every refunded other in separate file for audition purposes
+        # TODO: log every refunded other in separate file for audition purposes
 
-            refund = refund_order(order)
-            if refund:
-                logger.info(
-                    "Refund processed successfully.",
-                    extra={"refund_id": refund.id, "order_id": order.id},
-                )
-                refunded_orders[refund.id] = refund
-            else:
-                logger.warning("Refund not processed.", extra={"order_id": order.id})
+        refund = refund_order(order)
+        if refund:
+            logger.info(
+                "Refund processed successfully.",
+                extra={"refund_id": refund.id, "order_id": order.id},
+            )
+            refunded_orders[refund.id] = refund
+        else:
+            logger.warning("Refund not processed.", extra={"order_id": order.id})
 
-    else:
-        logger.info("No Tracking Data", extra={"trackings": trackings})
 
     logger.info(
         "Refund automation process completed.",

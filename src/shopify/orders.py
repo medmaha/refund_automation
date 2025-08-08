@@ -35,8 +35,13 @@ def __get_order_by_tracking_id(tracking_number: str, orders: list[ShopifyOrder])
 
 
 def __generate_tracking_payload(orders: list[ShopifyOrder]):
+    
     logger.info(f"Generating tracking payload for {len(orders)} orders")
     payload = []
+
+    if len(orders) < 1:
+        return payload
+    
     for order in orders:
         carrier_code = None
         tracking_number = None
@@ -74,6 +79,10 @@ def __generate_tracking_payload(orders: list[ShopifyOrder]):
 
 
 def __register_trackings(payload: list):
+
+    if len(payload) < 1:
+        return
+
     url = f"{TRACKING_BASE_URL}/register"
     headers = {"Content-Type": "application/json", "17token": TRACKING_API_KEY}
 
@@ -173,7 +182,6 @@ def __cleanup_shopify_orders(orders: list[ShopifyOrder]):
         try:
             # Pop the next order from the list
             order = orders.pop()
-
         except IndexError:
             break
 

@@ -10,8 +10,32 @@ LOG_DIR = ".logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
 
+class Logger(logging.Logger):
+    def __init__(self, name, level = 0):
+        super().__init__(name, level)
+
+    def debug(self, msg, *args, **kwargs):
+        super().debug(msg, *args, **kwargs)
+
+    def info(self, msg, *args, **kwargs):
+        super().info(msg, *args, **kwargs)
+
+    def warning(self, msg, *args, **kwargs):
+        super().warning(msg, *args, **kwargs)
+
+    def error(self, msg, *args, **kwargs):
+        super().error(msg, *args, **kwargs)
+
+    def critical(self, msg, *args, **kwargs):
+        super().critical(msg, *args, **kwargs)
+
+    def exception(self, msg, *args, **kwargs):
+        super().critical(msg, *args, **kwargs)
+
+    
+
 def get_logger(name: str = __name__) -> logging.Logger:
-    logger = logging.getLogger(name)
+    logger = Logger(name)
     if not logger.hasHandlers():
         # Stream handler
         stream_handler = logging.StreamHandler()

@@ -22,7 +22,7 @@ def process_refund_automation():
     trackings = retrieve_fulfilled_shopify_orders()
 
     if not len(trackings):
-        logger.info("No Tracking Data", extra={"trackings": trackings})
+        logger.warning("No Tracking Data", extra={"trackings": trackings})
         return sys.exit(0)
 
     refunded_orders = {}

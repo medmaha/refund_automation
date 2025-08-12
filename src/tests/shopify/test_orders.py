@@ -22,11 +22,8 @@ from src.shopify.orders import (
     retrieve_fulfilled_shopify_orders,
 )
 
-VALID_TRACKING_NUMBER = "123456"
-VALID_TRACKING_CARRIER_NUMBER = "2130001"
-
-
-
+VALID_TRACKING_NUMBER = "123456997764543"
+VALID_TRACKING_CARRIER_NUMBER = "30001"
 
 @pytest.fixture
 def shopify_order_without_tracking():

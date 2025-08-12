@@ -1,8 +1,9 @@
+import datetime
 import sys
 
 import requests
 
-from src.config import REQUEST_TIMEOUT, SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_URL
+from src.config import REQUEST_TIMEOUT, SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_URL, DRY_RUN
 from src.logger import get_logger
 from src.models.order import RefundCreateResponse, ShopifyOrder, TransactionKind
 from src.shopify.graph_ql_queries import REFUND_CREATE_MUTATION
@@ -15,6 +16,9 @@ headers = {
     "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
     "Content-Type": "application/json",
 }
+
+
+EXECUTION_MODE = "LIVE" if not DRY_RUN else "DRY_RUN"
 
 
 def process_refund_automation():
@@ -41,6 +45,7 @@ def process_refund_automation():
 
         # TODO: log every refunded other in separate file for audition purposes
 
+        logger.info(f"Processing refunds [mode={EXECUTION_MODE}]")
         refund = refund_order(order)
         if refund:
             logger.info(
@@ -58,8 +63,8 @@ def process_refund_automation():
 
 def refund_order(order: ShopifyOrder):
     logger.info(
-        "Initiating refund for order.",
-        extra={"order_id": order.id, "order_name": order.name},
+        f"Initiating refund for order: {order.id} - [mode={EXECUTION_MODE}]",
+        extra={"order_id": order.id, "order_name": order.name, "mode":EXECUTION_MODE},
     )
     _transactions = []
     try:
@@ -97,46 +102,58 @@ def refund_order(order: ShopifyOrder):
             }
         }
 
-        logger.info("Sending refund request to Shopify.", extra={"order_id": order.id})
-        response = requests.post(
-            endpoint,
-            headers=headers,
-            json={"query": REFUND_CREATE_MUTATION, "variables": variables},
-            timeout=REQUEST_TIMEOUT,
-        )
-
-        logger.debug(
-            "Shopify response received.", extra={"status_code": response.status_code}
-        )
-
-        response.raise_for_status()
-        data = response.json()
-        logger.debug("Shopify response JSON parsed.", extra={"response_data": data})
-
-        data = data.get("data", {})
-
-        user_errors = data.get("refundCreate", {}).get("userErrors", [])
-        error_messages = [err["message"] for err in user_errors]
-
-        if error_messages:
-            logger.error(
-                f"❌ [Refund Error - {order.name}]: ${error_messages}",
-                extra={"order_id": order.id},
+        logger.info(f"Sending refund request to Shopify.", extra={"order_id": order.id, "mode":EXECUTION_MODE})
+        
+        if EXECUTION_MODE == "LIVE":
+            response = requests.post(
+                endpoint,
+                headers=headers,
+                json={"query": REFUND_CREATE_MUTATION, "variables": variables},
+                timeout=REQUEST_TIMEOUT,
             )
-            return None
 
-        refund_data = data.get("refundCreate", {}).get("refund")
-
-        if not refund_data:
-            logger.error(
-                "No refund data returned from Shopify.", extra={"order_id": order.id}
+            logger.debug(
+                "Shopify response received.", extra={"status_code": response.status_code}
             )
-            return None
 
-        refund_data["orderId"] = order.id
-        refund_data["orderName"] = order.name
+            response.raise_for_status()
+            data = response.json()
+            logger.debug("Shopify response JSON parsed.", extra={"response_data": data})
 
-        refund = RefundCreateResponse(**refund_data)
+            data = data.get("data", {})
+
+            user_errors = data.get("refundCreate", {}).get("userErrors", [])
+            error_messages = [err["message"] for err in user_errors]
+
+            if error_messages:
+                logger.error(
+                    f"❌ [Refund Error - {order.name}]: ${error_messages}",
+                    extra={"order_id": order.id},
+                )
+                return None
+
+            refund_data = data.get("refundCreate", {}).get("refund")
+
+            if not refund_data:
+                logger.error(
+                    "No refund data returned from Shopify.", extra={"order_id": order.id}
+                )
+                return None
+
+            refund_data["orderId"] = order.id
+            refund_data["orderName"] = order.name
+
+            refund = RefundCreateResponse(**refund_data)
+        else:
+            # Create a dummy refund when its dry run
+            refund = RefundCreateResponse(
+                id=f"refund-{order.id}-DRY_RUN",
+                orderId=order.id,
+                orderName=f"{order.name}-R1 | DRY_RUN",
+                totalRefundedSet=order.totalPriceSet,
+                createdAt=str(datetime.datetime.now())
+            )
+
         logger.info(
             "Refund object created successfully.",
             extra={"refund_id": refund.id, "order_id": order.id},

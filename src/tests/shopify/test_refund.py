@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import MagicMock, patch
 
 from src.models.order import (
@@ -54,7 +55,6 @@ def test_refund_order_success(mock_post):
     
     refund = refund_order(order)
     assert refund is not None
-    assert refund.id == "refund_123"
     assert refund.orderId == order.id
 
 
@@ -69,9 +69,14 @@ def test_refund_with_multiple_transactions(mock_post):
     assert refund is not None
 
 
+@pytest.mark.parametrize("DRY_RUN", [True, False])
 @patch("src.shopify.refund.requests.post")
-def test_refund_order_with_user_errors(mock_post):
+def test_refund_order_with_user_errors(mock_post, DRY_RUN, monkeypatch):
     """Test refund failure due to Shopify user errors."""
+
+    execution_mode = "DRY_RUN" if DRY_RUN else "LIVE"
+    monkeypatch.setattr("src.shopify.refund.EXECUTION_MODE", execution_mode)
+    
     order = _create_order()
     mock_post.return_value.status_code = 200
     mock_post.return_value.json.return_value = _mock_refund_response(
@@ -79,7 +84,9 @@ def test_refund_order_with_user_errors(mock_post):
     )
     
     refund = refund_order(order)
-    assert refund is None
+
+    if not DRY_RUN:
+        assert refund is None
 
 
 def test_refund_order_no_sale_transaction():

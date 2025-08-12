@@ -1,12 +1,19 @@
 from unittest.mock import patch
 
-import pytest
-
 from src.models.order import (
+    DeliverableTracking,
+    Deliverable,
+    LineItem,
+    MoneyBag,
+    MoneyBagSet,
+    OrderTransaction,
+    ReturnFulfillments,
+    ReverseDeliveries,
+    ReverseFulfillmentOrder,
     ShopifyOrder,
+    TransactionKind,
 )
 from src.models.tracking import (
-    LatestEvent,
     LatestStatus,
     TrackInfo,
     TrackingData,
@@ -17,46 +24,62 @@ from src.shopify.orders import __cleanup_shopify_orders as cleanup_shopify_order
 from src.shopify.orders import __fetch_tracking_details as fetch_tracking_details
 from src.shopify.orders import __generate_tracking_payload as generate_tracking_payload
 from src.shopify.orders import __get_order_by_tracking_id as get_order_by_tracking_id
-from src.shopify.orders import (
-    parse_graphql_order_data,
-    retrieve_fulfilled_shopify_orders,
-)
+from src.shopify.orders import retrieve_fulfilled_shopify_orders
 
-VALID_TRACKING_NUMBER = "123456997764543"
-VALID_TRACKING_CARRIER_NUMBER = "30001"
-
-@pytest.fixture
-def shopify_order_without_tracking():
-    dummy_order = parse_graphql_order_data(dummy_order_node_2)
-    shopify_order = ShopifyOrder(**dummy_order)
-    return shopify_order
+TEST_TRACKING_NUMBER = "123456"
 
 
-@pytest.fixture
-def shopify_order_with_tracking():
-    dummy_order = parse_graphql_order_data(dummy_order_node_1)
-    shopify_order = ShopifyOrder(**dummy_order)
-    return shopify_order
+def _create_order_with_tracking(tracking_number=None, carrier_name=None):
+    """Helper to create order with optional tracking info."""
+    money_set = MoneyBagSet(presentmentMoney=MoneyBag(amount=100.0))
+    
+    # Create tracking if provided
+    returns = []
+    if tracking_number or carrier_name:
+        tracking = DeliverableTracking(number=tracking_number, carrierName=carrier_name)
+        deliverable = Deliverable(tracking=tracking)
+        reverse_delivery = ReverseDeliveries(deliverable=deliverable)
+        rfo = ReverseFulfillmentOrder(reverseDeliveries=[reverse_delivery])
+        return_fulfillment = ReturnFulfillments(
+            id="return_1", name="Return 1", reverseFulfillmentOrders=[rfo]
+        )
+        returns = [return_fulfillment]
+    
+    return ShopifyOrder(
+        id="order_test", name="#TEST", tags=[], 
+        lineItems=[LineItem(id="li1", quantity=1, refundableQuantity=1)],
+        totalPriceSet=money_set,
+        transactions=[OrderTransaction(id="tx1", gateway="test", kind=TransactionKind.SALE, amountSet=money_set)],
+        returns=returns
+    )
+
+
+def _create_tracking_data(tracking_number, status=TrackingStatus.DELIVERED, sub_status=TrackingSubStatus.DELIVERED_OTHER):
+    """Helper to create minimal tracking data."""
+    latest_status = LatestStatus(status=status, sub_status=sub_status, sub_status_descr=None)
+    track_info = TrackInfo(latest_status=latest_status, latest_event=None, milestone=[])
+    return TrackingData(tag="test", number=tracking_number, carrier=7041, param=None, track_info=track_info)
 
 
 # ----------------------
 # __get_order_by_tracking_id
 # ----------------------
-def test_get_order_by_tracking_id_found(
-    shopify_order_with_tracking, shopify_order_without_tracking
-):
+def test_get_order_by_tracking_id_found():
+    order_with_tracking = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
+    order_without_tracking = _create_order_with_tracking()
+    
     found = get_order_by_tracking_id(
-        VALID_TRACKING_NUMBER,
-        [shopify_order_with_tracking, shopify_order_without_tracking],
+        TEST_TRACKING_NUMBER, [order_with_tracking, order_without_tracking]
     )
-    assert found is shopify_order_with_tracking
+    assert found is order_with_tracking
 
 
-def test_get_order_by_tracking_id_not_found(
-    shopify_order_with_tracking, shopify_order_without_tracking
-):
+def test_get_order_by_tracking_id_not_found():
+    order_with_tracking = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
+    order_without_tracking = _create_order_with_tracking()
+    
     found = get_order_by_tracking_id(
-        "99999", [shopify_order_with_tracking, shopify_order_without_tracking]
+        "nonexistent", [order_with_tracking, order_without_tracking]
     )
     assert found is None
 
@@ -64,15 +87,12 @@ def test_get_order_by_tracking_id_not_found(
 # ----------------------
 # __generate_tracking_payload
 # ----------------------
-def test_generate_tracking_payload_valid(
-    shopify_order_with_tracking, shopify_order_without_tracking
-):
-    payload = generate_tracking_payload(
-        [shopify_order_with_tracking, shopify_order_without_tracking]
-    )
-    assert payload == [
-        {"number": VALID_TRACKING_NUMBER, "carrier": 7041}
-    ]  # DHL Paket fallback
+def test_generate_tracking_payload_valid():
+    order_with_tracking = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
+    order_without_tracking = _create_order_with_tracking()
+    
+    payload = generate_tracking_payload([order_with_tracking, order_without_tracking])
+    assert payload == [{"number": TEST_TRACKING_NUMBER, "carrier": 7041}]  # DHL Paket fallback
 
 
 def test_generate_tracking_payload_empty():
@@ -82,19 +102,16 @@ def test_generate_tracking_payload_empty():
 # ----------------------
 # __cleanup_shopify_orders
 # ----------------------
-def test_cleanup_shopify_orders_keeps_valid(shopify_order_with_tracking):
-    orders = [shopify_order_with_tracking]
-    cleaned = cleanup_shopify_orders(orders.copy())
+def test_cleanup_shopify_orders_keeps_valid():
+    order = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
+    cleaned = cleanup_shopify_orders([order])
     assert len(cleaned) == 1
-    assert cleaned[0].id == shopify_order_with_tracking.id
+    assert cleaned[0].id == order.id
 
 
-def test_cleanup_shopify_orders_discards_invalid(shopify_order_with_tracking):
-    # Remove tracking info so valid_return_shipment is None
-    shopify_order_with_tracking.returns[0].reverseFulfillmentOrders[
-        0
-    ].reverseDeliveries[0].deliverable.tracking.number = None
-    cleaned = cleanup_shopify_orders([shopify_order_with_tracking])
+def test_cleanup_shopify_orders_discards_invalid():
+    order = _create_order_with_tracking()  # No tracking - invalid
+    cleaned = cleanup_shopify_orders([order])
     assert len(cleaned) == 0
 
 
@@ -102,85 +119,35 @@ def test_cleanup_shopify_orders_discards_invalid(shopify_order_with_tracking):
 # __fetch_tracking_details
 # ----------------------
 @patch("src.shopify.orders.requests.post")
-def test_fetch_tracking_details_matching(
-    mock_post, shopify_order_with_tracking, shopify_order_without_tracking
-):
-    latest_status = LatestStatus(
-        status=TrackingStatus.DELIVERED,
-        sub_status=TrackingSubStatus.DELIVERED_OTHER,
-        sub_status_descr=None,
-    )
-    latest_event = LatestEvent(
-        time_iso="2025-08-12T00:00:00Z",
-        time_utc=None,
-        description=None,
-        location=None,
-        stage=None,
-        sub_status=None,
-    )
-    track_info = TrackInfo(
-        latest_status=latest_status, latest_event=latest_event, milestone=[]
-    )
-
+def test_fetch_tracking_details_matching(mock_post):
+    order = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
+    tracking_data = _create_tracking_data(TEST_TRACKING_NUMBER)
+    
     mock_post.return_value.status_code = 200
     mock_post.return_value.json.return_value = {
-        "data": {
-            "accepted": [
-                {
-                    "tag": "x",
-                    "number": VALID_TRACKING_NUMBER,
-                    "carrier": 7041,
-                    "param": None,
-                    "track_info": track_info.model_dump(),
-                } 
-            ]
-        }
+        "data": {"accepted": [tracking_data.model_dump()]}
     }
 
     result = fetch_tracking_details(
-        [
-            {"number": VALID_TRACKING_NUMBER, "carrier": 7041},
-            {"number": "27397", "carrier": 7041},
-        ],
-        [shopify_order_with_tracking, shopify_order_without_tracking],
+        [{"number": TEST_TRACKING_NUMBER, "carrier": 7041}], [order]
     )
     assert len(result) == 1
-    assert result[0][0] is shopify_order_with_tracking
+    assert result[0][0] is order
     assert isinstance(result[0][1], TrackingData)
 
 
 @patch("src.shopify.orders.requests.post")
-def test_fetch_tracking_details_not_matching_status(
-    mock_post, shopify_order_with_tracking, shopify_order_without_tracking
-):
-    latest_status = LatestStatus(
-        status=TrackingStatus.NOTFOUND,
-        sub_status=TrackingSubStatus.NOTFOUND_OTHER,
-        sub_status_descr=None,
-    )
-    track_info = TrackInfo(latest_status=latest_status, latest_event=None, milestone=[])
-
+def test_fetch_tracking_details_not_matching_status(mock_post):
+    order = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
+    tracking_data = _create_tracking_data(TEST_TRACKING_NUMBER, TrackingStatus.NOTFOUND, TrackingSubStatus.NOTFOUND_OTHER)
+    
     mock_post.return_value.status_code = 200
     mock_post.return_value.json.return_value = {
-        "data": {
-            "accepted": [
-                {
-                    "tag": "x",
-                    "number": VALID_TRACKING_NUMBER,
-                    "carrier": VALID_TRACKING_CARRIER_NUMBER,
-                    "param": None,
-                    "track_info": track_info.model_dump(),
-                }
-            ]
-        }
+        "data": {"accepted": [tracking_data.model_dump()]}
     }
 
     result = fetch_tracking_details(
-        [
-            {"number": VALID_TRACKING_NUMBER, "carrier": VALID_TRACKING_CARRIER_NUMBER},
-            {"number": "99999", "carrier": VALID_TRACKING_CARRIER_NUMBER},
-        ],
-        [shopify_order_with_tracking, shopify_order_without_tracking],
+        [{"number": TEST_TRACKING_NUMBER, "carrier": 7041}], [order]
     )
     assert result == []
 
@@ -189,43 +156,24 @@ def test_fetch_tracking_details_not_matching_status(
 # retrieve_fulfilled_shopify_orders (E2E patched)
 # ----------------------
 @patch("src.shopify.orders.__fetch_tracking_details")
+@patch("src.shopify.orders.__fetch_shopify_orders")
 @patch("src.shopify.orders.__register_trackings")
-@patch("src.shopify.orders.__generate_tracking_payload")
-@patch("src.shopify.orders.__cleanup_shopify_orders")
-@patch("src.shopify.orders.requests.post")
-def test_retrieve_fulfilled_shopify_orders_success(
-    mock_graphql_req,
-    mock_cleanup,
-    mock_generate_payload,
-    mock_register_trackings,
-    mock_fetch_trackings,
-    shopify_order_with_tracking,
+def test_retrieve_fulfilled_shopify_orders_success_e2e(
+    _,
+    mock_fetch_shopify_orders,
+    mock_fetch_tracking_details,
 ):
+    order = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
+    tracking = _create_tracking_data(TEST_TRACKING_NUMBER)
 
-    tracking_data = {
-        "number": VALID_TRACKING_NUMBER,
-        "carrier": VALID_TRACKING_CARRIER_NUMBER,
-        "tag": "tag1",
-    }
-    tracking = TrackingData(**tracking_data, param=None, track_info=None)
+    mock_fetch_tracking_details.return_value = [(order, tracking)]
 
-    mock_cleanup.return_value = [shopify_order_with_tracking]
-    mock_generate_payload.return_value = {
-        "number": VALID_TRACKING_NUMBER,
-        "carrier": VALID_TRACKING_CARRIER_NUMBER,
-    }
-    mock_fetch_trackings.return_value = [(shopify_order_with_tracking, tracking)]
-
-    mock_graphql_req.return_value.status_code = 200
-    mock_graphql_req.return_value.json.return_value = {
+    mock_fetch_shopify_orders.return_value = {
         "data": get_graphql_query_response()
     }
+    
     result = retrieve_fulfilled_shopify_orders()
-
-    assert result == [(shopify_order_with_tracking, tracking)]
-
-
-valid_dummy_return_id = "gid://shopify/Order/1002"
+    assert result == [(order, tracking)]
 
 
 def get_graphql_query_response():
@@ -246,53 +194,6 @@ def get_graphql_query_response():
 
     return shopify_graphql
 
-
-dummy_order_node_2 = {
-    "id": "gid://shopify/Order/1002",
-    "name": "#1002",
-    "tags": ["Standard"],
-    "transactions": [
-        {
-            "id": "gid://shopify/Transaction/tx3",
-            "kind": "SALE",
-            "gateway": "paypal",
-            "amountSet": {"presentmentMoney": {"amount": "200.00"}},
-        }
-    ],
-    "totalPriceSet": {
-        "shopMoney": {"amount": "200.00", "currencyCode": "USD"},
-        "presentmentMoney": {
-            "amount": "200.00",
-            "currencyCode": "USD",
-        },
-    },
-    "lineItems": {
-        "nodes": [
-            {
-                "id": "gid://shopify/LineItem/li3",
-                "quantity": 1,
-                "refundableQuantity": 0,
-            }
-        ]
-    },
-    "fulfillments": [
-        {
-            "id": "gid://shopify/Fulfillment/f2",
-            "name": "Fulfillment 2",
-            "totalQuantity": 1,
-            "displayStatus": "FULFILLED",
-            "requiresShipping": True,
-            "trackingInfo": [
-                {
-                    "number": "TRACK456",
-                    "company": "FedEx",
-                    "url": "https://fedex.com/track?num=TRACK456",
-                }
-            ],
-        }
-    ],
-    "returns": {"nodes": []},
-}
 
 dummy_order_node_1 = {
     "id": "gid://shopify/Order/1001",
@@ -342,7 +243,7 @@ dummy_order_node_1 = {
             "requiresShipping": True,
             "trackingInfo": [
                 {
-                    "number": "TRACK123",
+                    "number": "4238482203",
                     "company": "DHL",
                     "url": "https://dhl.com/track?num=TRACK123",
                 }
@@ -363,7 +264,7 @@ dummy_order_node_1 = {
                                         "deliverable": {
                                             "tracking": {
                                                 "carrierName": "DHL",
-                                                "number": VALID_TRACKING_NUMBER,
+                                                "number": "3937299393",
                                                 "url": "https://dhl.com/track?num=RETURN123",
                                             }
                                         }
@@ -376,4 +277,51 @@ dummy_order_node_1 = {
             }
         ]
     },
+}
+
+dummy_order_node_2 = {
+    "id": "gid://shopify/Order/1002",
+    "name": "#1002",
+    "tags": ["Standard"],
+    "transactions": [
+        {
+            "id": "gid://shopify/Transaction/tx3",
+            "kind": "SALE",
+            "gateway": "paypal",
+            "amountSet": {"presentmentMoney": {"amount": "200.00"}},
+        }
+    ],
+    "totalPriceSet": {
+        "shopMoney": {"amount": "200.00", "currencyCode": "USD"},
+        "presentmentMoney": {
+            "amount": "200.00",
+            "currencyCode": "USD",
+        },
+    },
+    "lineItems": {
+        "nodes": [
+            {
+                "id": "gid://shopify/LineItem/li3",
+                "quantity": 1,
+                "refundableQuantity": 0,
+            }
+        ]
+    },
+    "fulfillments": [
+        {
+            "id": "gid://shopify/Fulfillment/f2",
+            "name": "Fulfillment 2",
+            "totalQuantity": 1,
+            "displayStatus": "FULFILLED",
+            "requiresShipping": True,
+            "trackingInfo": [
+                {
+                    "number": "10i30i020209",
+                    "company": "FedEx",
+                    "url": "https://fedex.com/track?num=TRACK456",
+                }
+            ],
+        }
+    ],
+    "returns": {"nodes": []},
 }

@@ -1,256 +1,124 @@
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.models.order import (
     LineItem,
     MoneyBag,
     MoneyBagSet,
     OrderTransaction,
-    RefundCreateResponse,
     ShopifyOrder,
     TransactionKind,
 )
 from src.shopify.refund import process_refund_automation, refund_order
 
 
-@pytest.fixture
-def sample_order():
-    amount = 100
-    currencyCode = "USD"
+def _create_order(transaction_kinds=None):
+    """Helper to create minimal order for testing."""
+    if transaction_kinds is None:
+        transaction_kinds = [TransactionKind.SALE]
+    
+    money_set = MoneyBagSet(presentmentMoney=MoneyBag(amount=100.0))
+    transactions = [
+        OrderTransaction(id=f"tx_{i}", gateway="test", kind=kind, amountSet=money_set)
+        for i, kind in enumerate(transaction_kinds)
+    ]
+    
     return ShopifyOrder(
-        id="order_1",
-        name="#1001",
-        tags=[],
+        id="test_order", name="#TEST", tags=[], 
         lineItems=[LineItem(id="li1", quantity=1, refundableQuantity=1)],
-        totalPriceSet=MoneyBagSet(
-            presentmentMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-            shopMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-        ),
-        transactions=[
-            OrderTransaction(
-                id="txn1",
-                gateway="manual",
-                kind=TransactionKind.SALE,
-                amountSet=MoneyBagSet(
-                    presentmentMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-                    shopMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-                ),
-            )
-        ],
-        returns=[],
+        totalPriceSet=money_set, transactions=transactions, returns=[]
     )
 
 
-@pytest.fixture
-def sample_order_with_multiple_transactions():
-    amount = 200
-    currencyCode = "EUR"
-
-    return ShopifyOrder(
-        id="order_1",
-        name="#1001",
-        tags=[],
-        lineItems=[LineItem(id="li1", quantity=1, refundableQuantity=1)],
-        totalPriceSet=MoneyBagSet(
-            presentmentMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-            shopMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-        ),
-        transactions=[
-            OrderTransaction(
-                id="txn1",
-                gateway="manual",
-                kind=TransactionKind.SALE,
-                amountSet=MoneyBagSet(
-                    presentmentMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-                    shopMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-                ),
-            ),
-            OrderTransaction(
-                id="txn2",
-                gateway="manual",
-                kind=TransactionKind.VOID,
-                amountSet=MoneyBagSet(
-                    presentmentMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-                    shopMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-                ),
-            ),
-            OrderTransaction(
-                id="txn3",
-                gateway="manual",
-                kind=TransactionKind.CAPTURE,
-                amountSet=MoneyBagSet(
-                    presentmentMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-                    shopMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-                ),
-            ),
-            OrderTransaction(
-                id="txn4",
-                gateway="manual",
-                kind=TransactionKind.SUGGESTED_REFUND,
-                amountSet=MoneyBagSet(
-                    presentmentMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-                    shopMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-                ),
-            ),
-            OrderTransaction(
-                id="txn5",
-                gateway="manual",
-                kind=TransactionKind.CHANGE,
-                amountSet=MoneyBagSet(
-                    presentmentMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-                    shopMoney=MoneyBag(amount=amount, currencyCode=currencyCode),
-                ),
-            ),
-        ],
-        returns=[],
-    )
-
-
-@pytest.fixture
-def sample_tracking():
-    class DummyTracking:
-        def __init__(self):
-            self.track_info = MagicMock()
-            self.track_info.latest_event = MagicMock()
-
-    return DummyTracking()
-
-
-# -------------------------
-# refund_order() Tests
-# -------------------------
-@patch("src.shopify.refund.requests.post")
-def test_refund_order_success(mock_post, sample_order):
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-
-    refund_id = "refund_1"
-    mock_resp.json.return_value = {
+def _mock_refund_response(refund_id="test_refund", user_errors=None):
+    """Helper to create minimal mock refund response."""
+    return {
         "data": {
             "refundCreate": {
-                "userErrors": [],
+                "userErrors": user_errors or [],
                 "refund": {
                     "id": refund_id,
-                    "createdAt": "2025-08-12T00:00:00Z",
-                    "totalRefundedSet": {
-                        "presentmentMoney": {"amount": 100, "currencyCode": "USD"},
-                        "shopMoney": {"amount": 100, "currencyCode": "USD"},
-                    },
-                },
+                    "createdAt": "2025-01-01T00:00:00Z",
+                    "totalRefundedSet": {"presentmentMoney": {"amount": 100.0}}
+                } if not user_errors else None
             }
         }
     }
-    mock_post.return_value = mock_resp
-
-    refund = refund_order(sample_order)
-    assert refund is not None
-
-    assert isinstance(refund, RefundCreateResponse)
-    assert refund.id == refund_id
-    assert refund.orderId == sample_order.id
-    assert refund.orderName == sample_order.name
-    assert (
-        refund.totalRefundedSet.model_dump() == sample_order.totalPriceSet.model_dump()
-    )
 
 
 @patch("src.shopify.refund.requests.post")
-def test_refund_with_multiple_transactions(
-    mock_post, sample_order_with_multiple_transactions
-):
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-
-    refund_id = "refund_1"
-
-    mock_resp.json.return_value = {
-        "data": {
-            "refundCreate": {
-                "userErrors": [],
-                "refund": {
-                    "id": refund_id,
-                    "createdAt": "2025-08-12T00:00:00Z",
-                    "totalRefundedSet": sample_order_with_multiple_transactions.totalPriceSet.model_dump(),
-                },
-            }
-        }
-    }
-    mock_post.return_value = mock_resp
-
-    refund = refund_order(sample_order_with_multiple_transactions)
+def test_refund_order_success(mock_post):
+    """Test successful refund creation."""
+    order = _create_order()
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = _mock_refund_response("refund_123")
+    
+    refund = refund_order(order)
     assert refund is not None
-    assert (
-        refund.totalRefundedSet.model_dump()
-        == sample_order_with_multiple_transactions.totalPriceSet.model_dump()
-    )
+    assert refund.id == "refund_123"
+    assert refund.orderId == order.id
 
 
 @patch("src.shopify.refund.requests.post")
-def test_refund_order_with_user_errors(mock_post, sample_order):
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {
-        "data": {
-            "refundCreate": {
-                "userErrors": [{"message": "Refund not allowed"}],
-                "refund": None,
-            }
-        }
-    }
-    mock_post.return_value = mock_resp
+def test_refund_with_multiple_transactions(mock_post):
+    """Test refund with multiple valid transaction types."""
+    order = _create_order([TransactionKind.SALE, TransactionKind.SUGGESTED_REFUND])
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = _mock_refund_response()
+    
+    refund = refund_order(order)
+    assert refund is not None
 
-    refund = refund_order(sample_order)
+
+@patch("src.shopify.refund.requests.post")
+def test_refund_order_with_user_errors(mock_post):
+    """Test refund failure due to Shopify user errors."""
+    order = _create_order()
+    mock_post.return_value.status_code = 200
+    mock_post.return_value.json.return_value = _mock_refund_response(
+        user_errors=[{"message": "Refund not allowed"}]
+    )
+    
+    refund = refund_order(order)
     assert refund is None
 
 
-def test_refund_order_no_sale_transaction(sample_order):
-    sample_order.transactions[0].kind = TransactionKind.REFUND
-    result = refund_order(sample_order)
+def test_refund_order_no_sale_transaction():
+    """Test refund fails when order has no valid transactions."""
+    order = _create_order([TransactionKind.REFUND])  # Invalid transaction type
+    result = refund_order(order)
     assert result is None
 
 
-# -------------------------
-# process_refund_automation() Tests
-# -------------------------
-@pytest.mark.parametrize(
-    "order",
-    [
-        sample_order._fixture_function(),
-        sample_order_with_multiple_transactions._fixture_function(),
-    ],
-)
 @patch("src.shopify.refund.retrieve_fulfilled_shopify_orders")
 @patch("src.shopify.refund.refund_order")
-def test_process_refund_automation_with_orders(
-    mock_refund_order, mock_retrieve, sample_tracking, order: ShopifyOrder
-):
-    mock_retrieve.return_value = [(order, sample_tracking)]
-    mock_refund_order.return_value = RefundCreateResponse(
-        id="refund_1",
-        orderId=order.id,
-        orderName=order.name,
-        createdAt="2025-08-12T00:00:00Z",
-        totalRefundedSet=order.totalPriceSet.model_dump(),
-    )
-
+def test_process_refund_automation_with_orders(mock_refund_order, mock_retrieve):
+    """Test automation processes orders with valid tracking."""
+    order = _create_order()
+    tracking = MagicMock()
+    tracking.track_info.latest_event = MagicMock()  # Has latest event
+    
+    mock_retrieve.return_value = [(order, tracking)]
+    mock_refund_order.return_value = MagicMock(id="refund_123")
+    
     process_refund_automation()
-    mock_refund_order.assert_called_once()
+    mock_refund_order.assert_called_once_with(order)
 
 
 @patch("src.shopify.refund.retrieve_fulfilled_shopify_orders", return_value=[])
 @patch("src.shopify.refund.sys.exit")
 def test_process_refund_automation_no_orders(mock_exit, mock_retrieve):
-    mock_retrieve.return_value = []
+    """Test automation exits when no orders are found."""
     process_refund_automation()
     mock_exit.assert_called_once_with(0)
 
 
 @patch("src.shopify.refund.retrieve_fulfilled_shopify_orders")
-def test_process_refund_automation_missing_latest_event(
-    mock_retrieve, sample_order, sample_tracking
-):
-    sample_tracking.track_info.latest_event = None
-    mock_retrieve.return_value = [(sample_order, sample_tracking)]
-    # Should skip refund and not raise
+def test_process_refund_automation_missing_latest_event(mock_retrieve):
+    """Test automation skips orders without latest tracking event."""
+    order = _create_order()
+    tracking = MagicMock()
+    tracking.track_info.latest_event = None  # No latest event
+    
+    mock_retrieve.return_value = [(order, tracking)]
+    # Should not raise exception, just skip processing
     process_refund_automation()

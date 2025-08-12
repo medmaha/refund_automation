@@ -196,6 +196,21 @@ def __cleanup_shopify_orders(orders: list[ShopifyOrder]):
     return cleaned_orders
 
 
+def __fetch_shopify_orders(endpoint: str, headers: dict, variables: dict):
+    # Making the GraphQL request to Shopify
+    
+    response = requests.post(
+        endpoint,
+        headers=headers,
+        json={"query": RETURN_ORDERS_QUERY, "variables": variables},
+        timeout=REQUEST_TIMEOUT,
+    )
+
+    # Raise an error if the request failed
+    response.raise_for_status()
+
+    return response.json()
+
 def retrieve_fulfilled_shopify_orders():
     """
     Retrieve all matching shopify orders and merge them with their 17track tracking information
@@ -234,18 +249,7 @@ def retrieve_fulfilled_shopify_orders():
         variables["after"] = cursor
 
         logger.debug(f"Requesting Shopify orders page with cursor: {cursor}")
-        # Making the GraphQL request to Shopify
-        response = requests.post(
-            endpoint,
-            headers=headers,
-            json={"query": RETURN_ORDERS_QUERY, "variables": variables},
-            timeout=REQUEST_TIMEOUT,
-        )
-
-        # Raise an error if the request failed
-        response.raise_for_status()
-
-        data = response.json()
+        data = __fetch_shopify_orders(endpoint=endpoint, headers=headers, variables=variables)
 
         # Extract orders data from the response (graphQL)
         orders_data = data.get("data", {}).get("orders", {})

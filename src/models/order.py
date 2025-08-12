@@ -87,10 +87,13 @@ class ShopifyOrder(BaseModel):
     @property
     def valid_return_shipment(self):
         for returns in self.returns:
-            for rf in returns.reverseFulfillmentOrders:
-                for rd in rf.reverseDeliveries:
+            for rfo in returns.reverseFulfillmentOrders:
+                for rd in rfo.reverseDeliveries:
                     if (
                         rd.deliverable.tracking.number
                         and rd.deliverable.tracking.carrierName
                     ):
                         return returns
+
+        return None
+    

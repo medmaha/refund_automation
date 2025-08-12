@@ -1,28 +1,31 @@
+from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel
 
-main_status = [
-    "NotFound",
-    "InfoReceived",
-    "InTransit",
-    "Expired",
-    "AvailableForPickup",
-    "OutForDelivery",
-    "DeliveryFailure",
-    "Delivered",
-    "Exception",
-]
 
-sub_statues = [
-    "Exception_Returned",
-    "Exception_Returning",
-]
+class TrackingStatus(Enum):
+    NOTFOUND = "NotFound"
+    InfoReceived = "InfoReceived"
+    InTransit = "InTransit"
+    Expired = "Expired"
+    AvailableForPickup = "AvailableForPickup"
+    OutForDelivery = "OutForDelivery"
+    DeliveryFailure = "DeliveryFailure"
+    DELIVERED = "Delivered"
+    Exception = "Exception"
+
+
+class TrackingSubStatus(Enum):
+    NOTFOUND_OTHER = "NotFound_OTHER"
+    DELIVERED_OTHER = "Delivered_OTHER"
+    Exception_Returned = "Exception_Returned"
+    Exception_Returning = "Exception_Returning"
 
 
 class LatestStatus(BaseModel):
-    status: Optional[str]
-    sub_status: Optional[str]
+    status: Optional[TrackingStatus]
+    sub_status: Optional[TrackingSubStatus]
     sub_status_descr: Optional[str]
 
 
@@ -31,8 +34,8 @@ class LatestEvent(BaseModel):
     time_utc: Optional[str]
     description: Optional[str]
     location: Optional[str]
-    stage: Optional[str]
-    sub_status: Optional[str]
+    stage: Optional[TrackingStatus]
+    sub_status: Optional[TrackingSubStatus]
 
 
 class Milestone(BaseModel):
@@ -42,9 +45,9 @@ class Milestone(BaseModel):
 
 
 class TrackInfo(BaseModel):
-    latest_status: LatestStatus
-    latest_event: LatestEvent
     milestone: List[Milestone]
+    latest_status: LatestStatus
+    latest_event: Optional[LatestEvent]
 
 
 class TrackingData(BaseModel):

@@ -1,5 +1,6 @@
-import requests
 import sys
+
+import requests
 
 from src.config import REQUEST_TIMEOUT, SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_URL
 from src.logger import get_logger
@@ -50,7 +51,6 @@ def process_refund_automation():
         else:
             logger.warning("Refund not processed.", extra={"order_id": order.id})
 
-
     logger.info(
         f"[Refunded] -> {refunded_orders.values()}",
     )
@@ -63,8 +63,12 @@ def refund_order(order: ShopifyOrder):
     )
     _transactions = []
     try:
+        valid_transactions_for_refund = [
+            TransactionKind.SALE,
+            TransactionKind.SUGGESTED_REFUND,
+        ]
         for transaction in order.transactions:
-            if transaction.kind == TransactionKind.SALE:
+            if transaction.kind in valid_transactions_for_refund:
                 transaction.orderid = order.id
                 data = {
                     "orderId": order.id,

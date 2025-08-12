@@ -4,8 +4,6 @@ import requests
 
 from src.config import (
     REQUEST_TIMEOUT,
-    RETURN_TRACKING_STATUS,
-    RETURN_TRACKING_SUB_STATUS,
     SHOPIFY_ACCESS_TOKEN,
     SHOPIFY_STORE_URL,
     TRACKING_API_KEY,
@@ -13,7 +11,7 @@ from src.config import (
 )
 from src.logger import get_logger
 from src.models.order import ShopifyOrder
-from src.models.tracking import TrackingData
+from src.models.tracking import TrackingData, TrackingStatus, TrackingSubStatus
 
 from .graph_ql_queries import RETURN_ORDERS_QUERY
 
@@ -26,6 +24,10 @@ MAX_SHOPIFY_ORDER_DATA = 10_000
 def __get_order_by_tracking_id(tracking_number: str, orders: list[ShopifyOrder]):
     logger.debug(f"Searching for order with tracking number: {tracking_number}")
     for order in orders:
+        # Skip orders without valid return shipments
+        if not order.valid_return_shipment:
+            continue
+
         for rf in order.valid_return_shipment.reverseFulfillmentOrders:
             for rd in rf.reverseDeliveries:
                 if rd.deliverable.tracking.number == tracking_number:
@@ -35,16 +37,21 @@ def __get_order_by_tracking_id(tracking_number: str, orders: list[ShopifyOrder])
 
 
 def __generate_tracking_payload(orders: list[ShopifyOrder]):
-    
+
     logger.info(f"Generating tracking payload for {len(orders)} orders")
     payload = []
 
     if len(orders) < 1:
         return payload
-    
+
     for order in orders:
         carrier_code = None
         tracking_number = None
+
+        # Skip if not return shipment available
+        if not order.valid_return_shipment:
+            continue
+
         # Determine the return carrier
         for index, rf in enumerate(
             order.valid_return_shipment.reverseFulfillmentOrders
@@ -144,8 +151,8 @@ def __fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
 
             # Only add to result if status and sub-status match the return criteria
             if (
-                tracking_status == RETURN_TRACKING_STATUS
-                and tracking_sub_status == RETURN_TRACKING_SUB_STATUS
+                tracking_status == TrackingStatus.DELIVERED
+                and tracking_sub_status == TrackingSubStatus.DELIVERED_OTHER
             ):
                 logger.info(
                     f"Tracking number {_tracking.number} matches return criteria"
@@ -251,29 +258,7 @@ def retrieve_fulfilled_shopify_orders():
 
         logger.info(f"Fetched {len(edges)} orders from Shopify")
         for edge in edges:
-            node = edge["node"]
-            returns_nodes = node["returns"]["nodes"]
-
-            line_items = node["lineItems"]["nodes"]
-            node["lineItems"] = line_items
-
-            # Flatten nested return data for easier processing
-            for return_data in returns_nodes:
-
-                reverse_fulfillments_orders_nodes = return_data[
-                    "reverseFulfillmentOrders"
-                ]["nodes"]
-
-                return_data["reverseFulfillmentOrders"] = (
-                    reverse_fulfillments_orders_nodes
-                )
-
-                for r_fulfillment in reverse_fulfillments_orders_nodes:
-                    reverse_delivery_nodes = r_fulfillment["reverseDeliveries"]["nodes"]
-                    r_fulfillment["reverseDeliveries"] = reverse_delivery_nodes
-
-            # Add the processed order to the list
-            node["returns"] = returns_nodes
+            node = parse_graphql_order_data(edge["node"])
             orders.append(ShopifyOrder(**node))
 
         # Update pagination info for the next loop iteration
@@ -314,4 +299,57 @@ def retrieve_fulfilled_shopify_orders():
         return trackings
 
 
-__all__ = ("retrieve_fulfilled_shopify_orders",)
+def parse_graphql_order_data(node: dict):
+    # Handle returns data - check if it's already structured or needs extraction
+    returns_data = node.get("returns", {})
+    if isinstance(returns_data, dict) and "nodes" in returns_data:
+        returns_nodes = returns_data["nodes"]
+    elif isinstance(returns_data, list):
+        returns_nodes = returns_data
+    else:
+        returns_nodes = []
+
+    # Handle lineItems data - check if it's already structured or needs extraction
+    line_items_data = node.get("lineItems", {})
+    if isinstance(line_items_data, dict) and "nodes" in line_items_data:
+        line_items = line_items_data["nodes"]
+    elif isinstance(line_items_data, list):
+        line_items = line_items_data
+    else:
+        line_items = []
+
+    # Flatten nested return data for easier processing
+    for return_data in returns_nodes:
+        # Handle reverseFulfillmentOrders
+        reverse_fulfillments_data = return_data.get("reverseFulfillmentOrders", {})
+        if (
+            isinstance(reverse_fulfillments_data, dict)
+            and "nodes" in reverse_fulfillments_data
+        ):
+            reverse_fulfillments_orders_nodes = reverse_fulfillments_data["nodes"]
+        elif isinstance(reverse_fulfillments_data, list):
+            reverse_fulfillments_orders_nodes = reverse_fulfillments_data
+        else:
+            reverse_fulfillments_orders_nodes = []
+
+        return_data["reverseFulfillmentOrders"] = reverse_fulfillments_orders_nodes
+
+        for r_fulfillment in reverse_fulfillments_orders_nodes:
+            # Handle reverseDeliveries
+            reverse_deliveries_data = r_fulfillment.get("reverseDeliveries", {})
+            if (
+                isinstance(reverse_deliveries_data, dict)
+                and "nodes" in reverse_deliveries_data
+            ):
+                reverse_delivery_nodes = reverse_deliveries_data["nodes"]
+            elif isinstance(reverse_deliveries_data, list):
+                reverse_delivery_nodes = reverse_deliveries_data
+            else:
+                reverse_delivery_nodes = []
+
+            r_fulfillment["reverseDeliveries"] = reverse_delivery_nodes
+
+    # Add the processed data to the node
+    node["lineItems"] = line_items
+    node["returns"] = returns_nodes
+    return node

@@ -53,8 +53,12 @@ class RefundCreateResponse(BaseModel):
 
 
 class TransactionKind(Enum):
+    VOID = "VOID"
     SALE = "SALE"
     REFUND = "REFUND"
+    CAPTURE = "CAPTURE"
+    CHANGE = "CHANGE"
+    SUGGESTED_REFUND = "SUGGESTED_REFUND"
 
 
 class OrderTransaction(BaseModel):

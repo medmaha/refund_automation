@@ -45,7 +45,7 @@ def __get_automation_id():
     
     import uuid
     
-    __automation_id = str(uuid.uuid4()).replace("-", "")[:16]
+    __automation_id = str(uuid.uuid4()).replace("-", "")[:16].upper()
     return __automation_id
 
 AUTOMATION_ID = __get_automation_id()

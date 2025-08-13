@@ -26,6 +26,7 @@ def exponential_backoff_retry(
         jitter: Whether to add random jitter to prevent thundering herd
     """
     def decorator(func: Callable) -> Callable:
+        
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
             last_exception = None
@@ -84,6 +85,7 @@ def exponential_backoff_retry(
                 raise last_exception
                 
         return wrapper
+    
     return decorator
 
 

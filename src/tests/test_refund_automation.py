@@ -14,7 +14,7 @@ class TestDryRunMode:
     """Test DRY_RUN mode functionality."""
     
     @patch('src.config.DRY_RUN', True)
-    @patch('src.shopify.refund.retrieve_fulfilled_shopify_orders')
+    @patch('src.shopify.refund.retrieve_refundable_shopify_orders')
     @patch('src.shopify.refund.slack_notifier')
     def test_dry_run_mode_processes_orders_without_mutations(self, mock_slack, mock_retrieve, sample_order, sample_tracking):
         """Test that DRY_RUN mode processes orders but doesn't make actual API calls."""
@@ -61,7 +61,7 @@ class TestLiveMode:
     """Test LIVE mode functionality."""
     
     @patch('src.shopify.refund.EXECUTION_MODE', 'LIVE')
-    @patch('src.shopify.refund.retrieve_fulfilled_shopify_orders')
+    @patch('src.shopify.refund.retrieve_refundable_shopify_orders')
     @patch('src.shopify.refund.slack_notifier')
     @patch('requests.post')
     def test_live_mode_makes_actual_api_calls(self, mock_post, mock_slack, mock_retrieve, sample_order, sample_tracking):

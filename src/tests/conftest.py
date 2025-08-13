@@ -75,6 +75,57 @@ class TestFixtures:
         )
     
     @staticmethod
+    def create_api_error_response(error_message: str = "Test API error") -> Dict[str, Any]:
+        """Create a mock API error response."""
+        return {
+            "data": {
+                "refundCreate": {
+                    "userErrors": [{"message": error_message}],
+                    "refund": None
+                }
+            }
+        }
+    
+    @staticmethod
+    def create_tracking_payload(tracking_numbers: List[str] = None) -> List[Dict[str, Any]]:
+        """Create a tracking payload for API testing."""
+        if tracking_numbers is None:
+            tracking_numbers = [TestConstants.DEFAULT_TRACKING_NUMBER]
+        
+        return [
+            {"number": num, "carrier": 7041}  # DHL Paket
+            for num in tracking_numbers
+        ]
+    
+    @staticmethod
+    def create_tracking_api_response(tracking_numbers: List[str] = None, 
+                                   status: str = "delivered") -> Dict[str, Any]:
+        """Create a mock tracking API response."""
+        if tracking_numbers is None:
+            tracking_numbers = [TestConstants.DEFAULT_TRACKING_NUMBER]
+        
+        accepted_data = []
+        for num in tracking_numbers:
+            accepted_data.append({
+                "number": num,
+                "carrier": 7041,
+                "track_info": {
+                    "latest_status": {
+                        "status": status,
+                        "sub_status": "delivered_other" if status == "delivered" else "other"
+                    },
+                    "latest_event": TestConstants.DEFAULT_TRACKING_EVENT
+                }
+            })
+        
+        return {
+            "data": {
+                "accepted": accepted_data,
+                "rejected": []
+            }
+        }
+    
+    @staticmethod
     def create_transaction(transaction_id: str = None,
                           kind: TransactionKind = TransactionKind.SALE,
                           amount: float = TestConstants.DEFAULT_AMOUNT,

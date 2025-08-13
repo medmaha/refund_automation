@@ -21,15 +21,14 @@ class IdempotencyManager:
         self.ttl_hours = ttl_hours
         self._cache: Dict[str, Dict[str, Any]] = {}
     
-
-    def initialize(self):
         filename = "idempotency.json"
         if DRY_RUN:
             filename = "dry_run." + filename
 
-        self.cache_file = os.path.join(CACHE_DIR, filename)
-        self._load_cache()
+        self.cache_file = str(os.path.join(CACHE_DIR, filename))
 
+    def initialize(self):
+        self._load_cache()
         logger.info(f"Idempotency Initialized:", extra={"ttl_hours":self.ttl_hours, "cache_file":self.cache_file})
     
     def _load_cache(self):
@@ -45,7 +44,7 @@ class IdempotencyManager:
             self._cache = {}
     
     def _save_cache(self):
-        """Save idempotency cache to file."""
+        """Save idempotency cache to file.""" 
         try:
             with open(self.cache_file, 'w') as f:
                 json.dump(self._cache, f, indent=2)

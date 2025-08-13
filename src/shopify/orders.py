@@ -13,6 +13,8 @@ from src.logger import get_logger
 from src.models.order import ShopifyOrder
 from src.models.tracking import TrackingData, TrackingStatus, TrackingSubStatus
 
+from src.utils.slack import slack_notifier
+
 from .graph_ql_queries import RETURN_ORDERS_QUERY
 
 logger = get_logger(__name__)
@@ -108,6 +110,8 @@ def __register_trackings(payload: list):
         rejected_trackings = response.json().get("data", {}).get("rejected", [])
         logger.info(f"[Registered Trackings]: {len(accepted_trackings)}")
         logger.info(f"[UnRegistered Trackings]: {len(rejected_trackings)}")
+        slack_notifier.send_info(f"Registering Tracking Information", details={"registered": len(accepted_trackings), "rejected": "rejected_trackings", "total": len(payload_segments)})
+
 
 
 def __fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
@@ -272,13 +276,17 @@ def retrieve_fulfilled_shopify_orders():
 
         trackings = []
 
+        orders_length = len(orders)
+        slack_notifier.send_info(f"Successfully fetched {orders_length} shopify orders")
+
         # If no orders were found, return an empty list
-        if not len(orders):
+        if not orders_length:
             logger.info("No orders found, returning empty tracking list")
             return trackings
 
         # Clean up orders to remove those not eligible for processing (refunding)
         cleaned_orders = __cleanup_shopify_orders(orders)
+        slack_notifier.send_info(f"Cleaned {len(cleaned_orders)} shopify orders from {orders_length} fetched")
 
         # If no cleaned orders remain, return an empty list
         if not len(cleaned_orders):

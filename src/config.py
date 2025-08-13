@@ -19,4 +19,4 @@ SHOPIFY_ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN")
 
 REQUEST_TIMEOUT = 15
 
-DRY_RUN = True
+DRY_RUN = os.getenv("DRY_RUN", "true") == "true"

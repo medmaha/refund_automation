@@ -19,6 +19,7 @@ logger = get_logger(__name__)
 
 REQUEST_PAGINATION_SIZE = 12
 MAX_SHOPIFY_ORDER_DATA = 10_000
+MAX_TRACKING_PAYLOAD_LENGTH = 40
 
 
 def __get_order_by_tracking_id(tracking_number: str, orders: list[ShopifyOrder]):
@@ -44,46 +45,49 @@ def __generate_tracking_payload(orders: list[ShopifyOrder]):
     if len(orders) < 1:
         return payload
 
-    for order in orders:
-        carrier_code = None
-        tracking_number = None
+    try:
+        for order in orders:
+            carrier_code = None
+            tracking_number = None
 
-        # Skip if not return shipment available
-        if not order.valid_return_shipment:
-            continue
-
-        # Determine the return carrier
-        for index, rf in enumerate(
-            order.valid_return_shipment.reverseFulfillmentOrders
-        ):
-
-            has_reverse_deliveries = len(rf.reverseDeliveries) > 0
-
-            if not has_reverse_deliveries:
+            # Skip if not return shipment available
+            if not order.valid_return_shipment:
                 continue
 
-            deliverable = rf.reverseDeliveries[index].deliverable
+            # Determine the return carrier
+            for index, rf in enumerate(
+                order.valid_return_shipment.reverseFulfillmentOrders
+            ):
 
-            if rf.reverseDeliveries and deliverable:
-                # Get carrier code from number
-                carrier_code = deliverable.tracking.carrierName
-                tracking_number = deliverable.tracking.number
+                has_reverse_deliveries = len(rf.reverseDeliveries) > 0
 
-        if carrier_code and not carrier_code.isdigit():
-            logger.debug(
-                f"Carrier code '{carrier_code}' is not digit, setting to 7041 (DHL Paket)"
-            )
-            carrier_code = 7041  # DHL Paket
+                if not has_reverse_deliveries:
+                    continue
 
-        if tracking_number:
-            logger.debug(
-                f"Adding tracking number: {tracking_number}, carrier: {carrier_code}"
-            )
-            payload.append({"number": tracking_number, "carrier": carrier_code})
+                deliverable = rf.reverseDeliveries[index].deliverable
 
-    logger.info(f"Generated tracking payload with {len(payload)} entries")
+                if rf.reverseDeliveries and deliverable:
+                    # Get carrier code from number
+                    carrier_code = deliverable.tracking.carrierName
+                    tracking_number = deliverable.tracking.number
+
+            if carrier_code and not carrier_code.isdigit():
+                logger.debug(
+                    f"Carrier code '{carrier_code}' is not digit, setting to 7041 (DHL Paket)"
+                )
+                carrier_code = 7041  # DHL Paket
+
+            if tracking_number:
+                logger.debug(
+                    f"Adding tracking number: {tracking_number}, carrier: {carrier_code}"
+                )
+                payload.append({"number": tracking_number, "carrier": carrier_code})
+
+        logger.info(f"Generated tracking payload with {len(payload)} entries")
+    except Exception as e:
+        logger.error(f"Failed to generate tracking payload -> error [{e}]")
+    
     return payload
-
 
 def __register_trackings(payload: list):
 
@@ -93,7 +97,7 @@ def __register_trackings(payload: list):
     url = f"{TRACKING_BASE_URL}/register"
     headers = {"Content-Type": "application/json", "17token": TRACKING_API_KEY}
 
-    payload_segments = [payload[i : i + 40] for i in range(0, len(payload), 40)]
+    payload_segments = [payload[i : i + MAX_TRACKING_PAYLOAD_LENGTH] for i in range(0, len(payload), MAX_TRACKING_PAYLOAD_LENGTH)]
 
     logger.info(
         f"Registering {len(payload)} trackings in {len(payload_segments)} segments"

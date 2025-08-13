@@ -128,7 +128,7 @@ class TestProcessAutomation:
     """Test the main process automation function."""
     
     @patch('src.shopify.refund.slack_notifier')
-    @patch('src.shopify.refund.retrieve_fulfilled_shopify_orders')
+    @patch('src.shopify.refund.retrieve_refundable_shopify_orders')
     @patch('sys.exit')
     def test_no_orders_found(self, mock_exit, mock_retrieve, mock_slack):
         """Test automation when no orders are found."""
@@ -140,7 +140,7 @@ class TestProcessAutomation:
     
     @patch('src.config.DRY_RUN', True)
     @patch('src.shopify.refund.slack_notifier')
-    @patch('src.shopify.refund.retrieve_fulfilled_shopify_orders')
+    @patch('src.shopify.refund.retrieve_refundable_shopify_orders')
     def test_processes_orders_with_tracking(self, mock_retrieve, mock_slack, sample_order_with_tracking, assert_helpers):
         """Test automation processes orders with valid tracking."""
         mock_retrieve.return_value = [sample_order_with_tracking]
@@ -152,7 +152,7 @@ class TestProcessAutomation:
         assert_helpers.assert_slack_called(mock_slack, should_call_info=True, should_call_summary=True)
     
     @patch('src.shopify.refund.slack_notifier')
-    @patch('src.shopify.refund.retrieve_fulfilled_shopify_orders')
+    @patch('src.shopify.refund.retrieve_refundable_shopify_orders')
     def test_skips_orders_without_tracking_event(self, mock_retrieve, mock_slack, sample_order, test_constants):
         """Test automation skips orders without latest tracking event."""
         tracking = Mock()

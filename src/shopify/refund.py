@@ -8,7 +8,7 @@ from src.config import REQUEST_TIMEOUT, SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_URL,
 from src.logger import get_logger
 from src.models.order import RefundCreateResponse, ShopifyOrder, TransactionKind
 from src.shopify.graph_ql_queries import REFUND_CREATE_MUTATION
-from src.shopify.orders import retrieve_fulfilled_shopify_orders
+from src.shopify.orders import retrieve_refundable_shopify_orders
 from src.utils.retry import exponential_backoff_retry
 from src.utils.slack import slack_notifier
 from src.utils.idempotency import idempotency_manager
@@ -48,7 +48,7 @@ def process_refund_automation():
     )
 
     try:
-        trackings = retrieve_fulfilled_shopify_orders()
+        trackings = retrieve_refundable_shopify_orders()
     except Exception as e:
         error_msg = f"Failed to retrieve Shopify orders: {e}"
         logger.error(error_msg, extra={"error": str(e)})
@@ -72,9 +72,16 @@ def process_refund_automation():
     logger.info(f"Processing {len(trackings)} orders for potential refunds")
 
     for idx, order_and_tracking in enumerate(trackings):
+        # Extract order and tracking first
+        order, tracking = order_and_tracking
+        
         logger.info(
-            f"Processing order {idx+1}/{len(trackings)}",
-            extra={"progress": f"{idx+1}/{len(trackings)}"}
+            f"Processing order {idx+1}/{len(trackings)} - {order.name}",
+            extra={
+                "progress": f"{idx+1}/{len(trackings)}",
+                "order_id": order.id,
+                "order_name": order.name
+            }
         )
 
         idempotency_key = idempotency_manager.generate_key(order.id, "refund")
@@ -82,11 +89,10 @@ def process_refund_automation():
         if idempotency_manager.is_duplicate_operation(idempotency_key):
             logger.info(
                 f"Idempotency: Skipping Order: {order.id}-{order.name}",
-                extra={"idempotency_key": idempotency_key, "order_id":order.id}
+                extra={"idempotency_key": idempotency_key, "order_id": order.id}
             )
-
-        
-        order, tracking = order_and_tracking
+            skipped_refunds += 1
+            continue
         latest_event = tracking.track_info.latest_event
         
         # Get tracking number for audit logging

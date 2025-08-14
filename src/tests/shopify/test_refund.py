@@ -5,9 +5,7 @@ from unittest.mock import patch, Mock
 from datetime import datetime
 
 from src.shopify.refund import process_refund_automation, refund_order
-from src.models.order import TransactionKind
-from src.utils.idempotency import idempotency_manager
-
+from src.tests.fixtures import *
 
 class TestDryRunMode:
     """Test DRY_RUN mode functionality."""
@@ -20,16 +18,36 @@ class TestDryRunMode:
         
         assert_helpers.assert_refund_created(refund, sample_order, is_dry_run=True)
     
-    @patch('src.config.DRY_RUN', True)
+    @patch('src.shopify.refund.EXECUTION_MODE', 'DRY_RUN')
     @patch('src.utils.slack.slack_notifier')
-    def test_dry_run_no_api_calls(self, mock_slack, sample_order, sample_tracking):
-        """Test that DRY_RUN mode doesn't make API calls."""
-        with patch('requests.post') as mock_post:
-            refund = refund_order(sample_order, sample_tracking)
+    @patch('requests.post')
+    def test_dry_run_no_api_calls(self, mock_post, mock_slack, sample_order, sample_tracking):
+        """Test that DRY_RUN mode doesn't make API calls to Shopify."""
+        # Mock Slack responses to avoid StopIteration
+        mock_slack_response = Mock()
+        mock_slack_response.status_code = 200
+        mock_slack_response.json.return_value = {'ok': True}
+        mock_slack_response.raise_for_status = Mock()
+        
+        # Configure mock_post to handle different URLs
+        def mock_post_side_effect(url, *args, **kwargs):
+            if 'slack.com' in url:
+                return mock_slack_response
+            elif 'myshopify.com' in url:
+                raise AssertionError("Shopify API should not be called in DRY_RUN mode")
+            return mock_slack_response
             
-        # Should not make any API calls
-        assert not mock_post.called
+        mock_post.side_effect = mock_post_side_effect
+        
+        refund = refund_order(sample_order, sample_tracking)
+        
+        # Should create a refund but not call Shopify API
         assert refund is not None
+        
+        # Verify Shopify API was not called (only Slack calls should happen)
+        shopify_calls = [call for call in mock_post.call_args_list 
+                        if call[0][0] and 'myshopify.com' in str(call[0][0])]
+        assert len(shopify_calls) == 0, "Shopify API should not be called in DRY_RUN mode"
 
 
 class TestLiveMode:
@@ -116,8 +134,21 @@ class TestErrorHandling:
     @patch('requests.post')
     def test_network_error_handling(self, mock_post, mock_slack, sample_order, sample_tracking, mock_helpers):
         """Test handling of network errors."""
-        # Mock network error
-        mock_post.side_effect = Exception("Network error")
+        # Mock Slack response to prevent StopIteration
+        mock_slack_response = Mock()
+        mock_slack_response.status_code = 200
+        mock_slack_response.json.return_value = {'ok': True}
+        mock_slack_response.raise_for_status = Mock()
+        
+        # Configure mock_post to handle different URLs
+        def mock_post_side_effect(url, *args, **kwargs):
+            if 'slack.com' in url:
+                return mock_slack_response  # Slack calls succeed
+            elif 'myshopify.com' in url:
+                raise Exception("Network error")  # Shopify calls fail
+            return mock_slack_response
+        
+        mock_post.side_effect = mock_post_side_effect
         
         refund = refund_order(sample_order, sample_tracking)
         
@@ -177,23 +208,43 @@ class TestRetryMechanism:
     @patch('requests.post')
     def test_retry_on_failure(self, mock_post, mock_sleep, mock_slack, sample_order, sample_tracking, successful_api_response, assert_helpers):
         """Test that API failures trigger retry mechanism."""
-        # First call fails, second succeeds
-        success_response = Mock(
+        # Mock Slack response for success notifications
+        mock_slack_response = Mock()
+        mock_slack_response.status_code = 200
+        mock_slack_response.json.return_value = {'ok': True}
+        mock_slack_response.raise_for_status = Mock()
+        
+        # Mock successful Shopify API response
+        shopify_success_response = Mock(
             status_code=200,
             json=Mock(return_value=successful_api_response),
             raise_for_status=Mock()
         )
         
-        mock_post.side_effect = [
-            Exception("Network error"),  # First call fails
-            success_response  # Second call succeeds
-        ]
+        # Configure mock_post to handle different URLs with retry scenario
+        shopify_call_count = 0
+        def mock_post_side_effect(url, *args, **kwargs):
+            nonlocal shopify_call_count
+            if 'slack.com' in url:
+                return mock_slack_response  # Slack calls always succeed
+            elif 'myshopify.com' in url:
+                shopify_call_count += 1
+                if shopify_call_count == 1:
+                    raise Exception("Network error")  # First call fails
+                else:
+                    return shopify_success_response  # Second call succeeds
+            return mock_slack_response
+        
+        mock_post.side_effect = mock_post_side_effect
         
         refund = refund_order(sample_order, sample_tracking)
         
         # Should eventually succeed after retry
         assert refund is not None
-        assert_helpers.assert_api_called(mock_post, expected_calls=2)
+        # Verify at least one Shopify call was made
+        shopify_calls = [call for call in mock_post.call_args_list 
+                        if call[0][0] and 'myshopify.com' in str(call[0][0])]
+        assert len(shopify_calls) >= 2, "Should retry failed API calls"
 
 
 class TestAuditLogging:

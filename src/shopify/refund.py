@@ -13,7 +13,6 @@ from src.utils.retry import exponential_backoff_retry
 from src.utils.slack import slack_notifier
 from src.utils.idempotency import idempotency_manager
 from src.utils.timezone import get_current_time_iso8601, timezone_handler
-from src.utils.idempotency import check_operation_idempotency, mark_operation_completed
 from src.utils.audit import log_refund_audit, audit_logger
 
 logger = get_logger(__name__)
@@ -222,7 +221,7 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
     )
     
     # Check for idempotency to prevent duplicate refunds
-    idempotency_key, is_duplicate = check_operation_idempotency(
+    idempotency_key, is_duplicate = idempotency_manager.check_operation_idempotency(
         order_id=order.id,
         operation="refund",
         amount=order_amount
@@ -312,7 +311,7 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
         
         if refund:
             # Mark operation as completed for idempotency
-            mark_operation_completed(
+            idempotency_manager.mark_operation_completed(
                 idempotency_key=idempotency_key,
                 order_id=order.id,
                 operation="refund",
@@ -413,7 +412,7 @@ def _prepare_refund_transactions(order: ShopifyOrder) -> list:
             data = {
                 "orderId": order.id,
                 "parentId": transaction.id,
-                "kind": TransactionKind.REFUND,
+                "kind": TransactionKind.REFUND.value,
                 "gateway": transaction.gateway,
                 "amount": transaction.amountSet.presentmentMoney.amount,
             }
@@ -470,6 +469,14 @@ def _execute_shopify_refund(order: ShopifyOrder, variables: dict, request_id: st
             status_code=response.status_code,
             response_time_ms=response_time_ms
         )
+        
+        # Handle null JSON response
+        if data is None:
+            logger.error(
+                f"Received null JSON response from Shopify for order {order.name}",
+                extra={"order_id": order.id, "request_id": request_id}
+            )
+            return None
         
         # Process Shopify response
         response_data = data.get("data", {})

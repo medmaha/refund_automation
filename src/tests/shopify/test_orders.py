@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import patch
 
 from src.models.order import (
@@ -27,6 +28,15 @@ from src.shopify.orders import __get_order_by_tracking_id as get_order_by_tracki
 from src.shopify.orders import retrieve_refundable_shopify_orders
 
 TEST_TRACKING_NUMBER = "123456"
+
+
+@pytest.fixture(autouse=True)
+def mock_slack_notifier():
+    
+    with patch('src.shopify.orders.slack_notifier') as mock_slack:
+        yield mock_slack
+
+
 
 
 def _create_order_with_tracking(tracking_number=None, carrier_name=None):
@@ -119,7 +129,7 @@ def test_cleanup_shopify_orders_discards_invalid():
 # __fetch_tracking_details
 # ----------------------
 @patch("src.shopify.orders.requests.post")
-def test_fetch_tracking_details_matching(mock_post):
+def test_fetch_tracking_details_matching(mock_post, mock_slack_notifier):
     order = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
     tracking_data = _create_tracking_data(TEST_TRACKING_NUMBER)
     
@@ -137,7 +147,7 @@ def test_fetch_tracking_details_matching(mock_post):
 
 
 @patch("src.shopify.orders.requests.post")
-def test_fetch_tracking_details_not_matching_status(mock_post):
+def test_fetch_tracking_details_not_matching_status(mock_post, mock_slack_notifier):
     order = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
     tracking_data = _create_tracking_data(TEST_TRACKING_NUMBER, TrackingStatus.NOTFOUND, TrackingSubStatus.NOTFOUND_OTHER)
     
@@ -162,6 +172,7 @@ def test_retrieve_refundable_shopify_orders_success_e2e(
     _,
     mock_fetch_shopify_orders,
     mock_fetch_tracking_details,
+    mock_slack_notifier,
 ):
     order = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
     tracking = _create_tracking_data(TEST_TRACKING_NUMBER)

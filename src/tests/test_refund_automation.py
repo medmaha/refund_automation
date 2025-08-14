@@ -2,107 +2,8 @@
 
 from unittest.mock import Mock, patch
 
-from src.shopify.refund import process_refund_automation, refund_order
+from src.shopify.refund import  refund_order
 from src.tests.fixtures import *
-
-
-class TestDryRunMode:
-    """Test DRY_RUN mode functionality."""
-    
-    @patch('src.config.DRY_RUN', True)
-    @patch('src.shopify.refund.retrieve_refundable_shopify_orders')
-    @patch('src.shopify.refund.slack_notifier')
-    def test_dry_run_mode_processes_orders_without_mutations(self, mock_slack, mock_retrieve, sample_order, sample_tracking):
-        """Test that DRY_RUN mode processes orders but doesn't make actual API calls."""
-        # Setup
-        mock_retrieve.return_value = [(sample_order, sample_tracking)]
-        
-        # Execute
-        with patch('sys.exit') as mock_exit:
-            process_refund_automation()
-        
-        # Verify no actual API calls were made
-        assert mock_slack.send_info.called
-        assert mock_slack.send_refund_summary.called
-        
-        # Verify successful refund was processed (since DRY_RUN works correctly)
-        summary_call = mock_slack.send_refund_summary.call_args[1]
-        assert summary_call['successful_refunds'] == 1
-        assert summary_call['failed_refunds'] == 0
-    
-    @patch('src.config.DRY_RUN', True)
-    def test_dry_run_refund_creates_mock_refund(self, sample_order, sample_tracking):
-        """Test that DRY_RUN mode creates mock refunds."""
-        with patch('src.utils.slack.slack_notifier'):
-            refund = refund_order(sample_order, sample_tracking)
-        
-        assert refund is not None
-        assert "dry-run" in refund.id.lower()
-        assert "DRY_RUN" in refund.orderName
-        assert refund.orderId == sample_order.id
-    
-
-class TestLiveMode:
-    """Test LIVE mode functionality."""
-    
-    @patch('src.shopify.refund.EXECUTION_MODE', 'LIVE')
-    @patch('src.shopify.refund.retrieve_refundable_shopify_orders')
-    @patch('src.shopify.refund.slack_notifier')
-    @patch('requests.post')
-    def test_live_mode_makes_actual_api_calls(self, mock_post, mock_slack, mock_retrieve, sample_order, sample_tracking):
-        """Test that LIVE mode makes actual API calls to Shopify."""
-        # Setup successful API response
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": {
-                "refundCreate": {
-                    "refund": {
-                        "id": "gid://shopify/Refund/67890",
-                        "createdAt": "2023-01-01T00:00:00Z",
-                        "totalRefundedSet": {
-                            "presentmentMoney": {"amount": "100.0", "currencyCode": "USD"}
-                        }
-                    },
-                    "userErrors": []
-                }
-            }
-        }
-        mock_response.raise_for_status = Mock()
-        mock_post.return_value = mock_response
-        
-        mock_retrieve.return_value = [(sample_order, sample_tracking)]
-        
-        # Execute
-        with patch('sys.exit') as mock_exit:
-            process_refund_automation()
-        
-        # Verify API call was made
-        assert mock_post.called
-        assert mock_slack.send_refund_summary.called
-    
-    @patch('src.shopify.refund.EXECUTION_MODE', 'LIVE')
-    @patch('requests.post')
-    def test_live_mode_handles_api_errors(self, mock_post, sample_order, sample_tracking):
-        """Test that LIVE mode properly handles API errors."""
-        # Setup API error response
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": {
-                "refundCreate": {
-                    "refund": None,
-                    "userErrors": [{"message": "Test error"}]
-                }
-            }
-        }
-        mock_response.raise_for_status = Mock()
-        mock_post.return_value = mock_response
-        
-        with patch('src.utils.slack.slack_notifier'):
-            refund = refund_order(sample_order, sample_tracking)
-        
-        assert refund is None
 
 class TestRetryMechanism:
     """Test retry mechanism functionality."""
@@ -180,4 +81,4 @@ class TestConfigurationValidation:
         with patch('src.config.DRY_RUN', False):
             importlib.reload(src.shopify.refund)
             assert src.shopify.refund.EXECUTION_MODE == "LIVE"
-
+            

@@ -27,7 +27,6 @@ class IdempotencyManager:
 
         self.cache_file = str(os.path.join(CACHE_DIR, filename))
 
-    def initialize(self):
         self._load_cache()
         logger.info(f"Idempotency Initialized:", extra={"ttl_hours":self.ttl_hours, "cache_file":self.cache_file})
     
@@ -196,23 +195,19 @@ class IdempotencyManager:
             "ttl_hours": self.ttl_hours
         }
 
+    def check_operation_idempotency(self, order_id: str, operation: str = "refund", **kwargs) -> tuple[str, bool]:
+        """
+        Check if an operation is idempotent (already performed).
+        
+        Returns:
+            Tuple of (idempotency_key, is_duplicate)
+        """
+        key = idempotency_manager.generate_key(order_id, operation, **kwargs)
+        is_duplicate = idempotency_manager.is_duplicate_operation(key)
+        return key, is_duplicate
 
+
+
+        
 # Global instance
 idempotency_manager = IdempotencyManager()
-
-
-def check_operation_idempotency(order_id: str, operation: str = "refund", **kwargs) -> tuple[str, bool]:
-    """
-    Check if an operation is idempotent (already performed).
-    
-    Returns:
-        Tuple of (idempotency_key, is_duplicate)
-    """
-    key = idempotency_manager.generate_key(order_id, operation, **kwargs)
-    is_duplicate = idempotency_manager.is_duplicate_operation(key)
-    return key, is_duplicate
-
-
-def mark_operation_completed(idempotency_key: str, order_id: str, operation: str = "refund", result: Any = None):
-    """Mark an operation as completed."""
-    idempotency_manager.mark_operation_completed(idempotency_key, order_id, operation, result)

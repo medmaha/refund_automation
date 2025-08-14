@@ -16,8 +16,6 @@ def main(mode: str):
         f"================================= [Refund Automation - {mode}] ================================="
     )
     
-    idempotency_manager.initialize()
-    
     # Log system information
     logger.info(
         "System initialization",

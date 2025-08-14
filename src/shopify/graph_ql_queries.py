@@ -3,88 +3,195 @@
 
 RETURN_ORDERS_QUERY = """
 query ($first: Int, $after: String, $query: String) {
-  orders(
-    first: $first
-    after: $after
-    query: $query
-  ) {
-
+  orders(first: $first, after: $after, query: $query) {
     pageInfo {
-        hasNextPage
-        hasPreviousPage
-        startCursor
-        endCursor
+      hasNextPage
+      hasPreviousPage
+      startCursor
+      endCursor
     }
-
     edges {
-        cursor
-        node {
-            id
-            name
-            tags
-            transactions {
-              id
-              kind
-              gateway
-              amountSet {
-                presentmentMoney {
-                  amount
-                }
-              }
+      cursor
+      node {
+        id
+        name
+        tags
+        transactions {
+          id
+          kind
+          gateway
+          amountSet {
+            presentmentMoney {
+              amount
             }
-            totalPriceSet {
-              shopMoney {
-                amount
-                currencyCode
-              }
+            shopMoney {
+              amount
+              currencyCode
+            }
+          }
+        }
+        suggestedRefund(
+          suggestFullRefund: true
+          refundMethodAllocation: ORIGINAL_PAYMENT_METHODS
+          refundShipping: true
+        ) {
+          amountSet {
+            presentmentMoney {
+              amount
+              currencyCode
+            }
+          }
+          refundDuties {
+            amountSet {
               presentmentMoney {
                 amount
                 currencyCode
               }
             }
-            lineItems (first: $first){
-              nodes {
-                id,
-                quantity
-                refundableQuantity   
+            originalDuty {
+              id
+            }
+          }
+          shipping {
+            amountSet {
+              presentmentMoney {
+                amount
+                currencyCode
               }
             }
-            fulfillments {
-                id
-                name
-                totalQuantity
-                displayStatus
-                requiresShipping
-                trackingInfo(first: 10) {
-                    number
-                    company
-                    url
-                }
+          }
+          suggestedTransactions {
+            amountSet {
+              presentmentMoney {
+                amount
+                currencyCode
+              }
             }
-            returns(first: $first) {
+            gateway
+            kind
+            parentTransaction {
+              id
+            }
+          }
+        }
+        totalPriceSet {
+          shopMoney {
+            amount
+            currencyCode
+          }
+          presentmentMoney {
+            amount
+            currencyCode
+          }
+        }
+        lineItems(first: $first) {
+          nodes {
+            id
+            quantity
+            refundableQuantity
+            originalTotalSet {
+              presentmentMoney {
+                amount
+                currencyCode
+              }
+              shopMoney {
+                amount
+                currencyCode
+              }
+            }
+            discountAllocations {
+              allocatedAmountSet {
+                presentmentMoney {
+                  amount
+                  currencyCode
+                }
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+            }
+            taxLines {
+              title
+              rate
+              priceSet {
+                presentmentMoney {
+                  amount
+                  currencyCode
+                }
+                shopMoney {
+                  amount
+                  currencyCode
+                }
+              }
+            }
+          }
+        }
+        fulfillments {
+          id
+          name
+          totalQuantity
+          displayStatus
+          requiresShipping
+          trackingInfo(first: 10) {
+            number
+            company
+            url
+          }
+        }
+        returns(first: $first) {
+          nodes {
+            id
+            name
+            status
+            returnLineItems(first: 10) {
               nodes {
-                id
-                name
-                reverseFulfillmentOrders(first: 5) {
-                  nodes {
-                    reverseDeliveries(first: 5) {
-                      nodes {
-                        deliverable {
-                          ... on ReverseDeliveryShippingDeliverable {
-                            tracking {
-                              carrierName
-                              number
-                              url
-                            }
-                          }
+                ... on ReturnLineItem {
+                  id
+                  quantity
+                  returnReason
+                  returnReasonNote
+                  fulfillmentLineItem {
+                    id
+                    lineItem {
+                      id
+                      name
+                      quantity
+                      originalTotalSet {
+                        presentmentMoney {
+                          amount
+                          currencyCode
+                        }
+                        shopMoney {
+                          amount
+                          currencyCode
                         }
                       }
                     }
                   }
                 }
               }
+            }
+            reverseFulfillmentOrders(first: 5) {
+              nodes {
+                reverseDeliveries(first: 5) {
+                  nodes {
+                    deliverable {
+                      ... on ReverseDeliveryShippingDeliverable {
+                        tracking {
+                          carrierName
+                          number
+                          url
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
+      }
     }
   }
 }

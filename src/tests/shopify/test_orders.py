@@ -1,3 +1,4 @@
+import pytest
 from unittest.mock import patch
 
 from src.models.order import (
@@ -24,9 +25,18 @@ from src.shopify.orders import __cleanup_shopify_orders as cleanup_shopify_order
 from src.shopify.orders import __fetch_tracking_details as fetch_tracking_details
 from src.shopify.orders import __generate_tracking_payload as generate_tracking_payload
 from src.shopify.orders import __get_order_by_tracking_id as get_order_by_tracking_id
-from src.shopify.orders import retrieve_fulfilled_shopify_orders
+from src.shopify.orders import retrieve_refundable_shopify_orders
 
 TEST_TRACKING_NUMBER = "123456"
+
+
+@pytest.fixture(autouse=True)
+def mock_slack_notifier():
+    
+    with patch('src.shopify.orders.slack_notifier') as mock_slack:
+        yield mock_slack
+
+
 
 
 def _create_order_with_tracking(tracking_number=None, carrier_name=None):
@@ -119,7 +129,7 @@ def test_cleanup_shopify_orders_discards_invalid():
 # __fetch_tracking_details
 # ----------------------
 @patch("src.shopify.orders.requests.post")
-def test_fetch_tracking_details_matching(mock_post):
+def test_fetch_tracking_details_matching(mock_post, mock_slack_notifier):
     order = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
     tracking_data = _create_tracking_data(TEST_TRACKING_NUMBER)
     
@@ -137,7 +147,7 @@ def test_fetch_tracking_details_matching(mock_post):
 
 
 @patch("src.shopify.orders.requests.post")
-def test_fetch_tracking_details_not_matching_status(mock_post):
+def test_fetch_tracking_details_not_matching_status(mock_post, mock_slack_notifier):
     order = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
     tracking_data = _create_tracking_data(TEST_TRACKING_NUMBER, TrackingStatus.NOTFOUND, TrackingSubStatus.NOTFOUND_OTHER)
     
@@ -153,15 +163,16 @@ def test_fetch_tracking_details_not_matching_status(mock_post):
 
 
 # ----------------------
-# retrieve_fulfilled_shopify_orders (E2E patched)
+# retrieve_refundable_shopify_orders (E2E patched)
 # ----------------------
 @patch("src.shopify.orders.__fetch_tracking_details")
 @patch("src.shopify.orders.__fetch_shopify_orders")
 @patch("src.shopify.orders.__register_trackings")
-def test_retrieve_fulfilled_shopify_orders_success_e2e(
+def test_retrieve_refundable_shopify_orders_success_e2e(
     _,
     mock_fetch_shopify_orders,
     mock_fetch_tracking_details,
+    mock_slack_notifier,
 ):
     order = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
     tracking = _create_tracking_data(TEST_TRACKING_NUMBER)
@@ -172,7 +183,7 @@ def test_retrieve_fulfilled_shopify_orders_success_e2e(
         "data": get_graphql_query_response()
     }
     
-    result = retrieve_fulfilled_shopify_orders()
+    result = retrieve_refundable_shopify_orders()
     assert result == [(order, tracking)]
 
 

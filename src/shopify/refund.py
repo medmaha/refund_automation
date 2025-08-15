@@ -91,7 +91,13 @@ def process_refund_automation():
 
         refund_calculation = refund_calculator.calculate_refund(order, tracking)
         refund_amount = refund_calculation.total_refund_amount
-        idempotency_key, is_duplicated = idempotency_manager.check_operation_idempotency(order.id, operation="refund", refund_amount=refund_amount)
+        idempotency_key, is_duplicated = idempotency_manager.check_operation_idempotency(
+            order.id,
+            operation="refund",
+            refund_id=order.return_id,
+            tracking_no=tracking.number,
+            refund_amount=refund_amount
+        )
 
         if is_duplicated:
             logger.info(
@@ -155,10 +161,10 @@ def process_refund_automation():
                 
                 # Add to total amount
                 if hasattr(refund.totalRefundedSet, 'presentmentMoney'):
-                    total_refunded_amount += refund.totalRefundedSet.presentmentMoney.amount
+                    total_refunded_amount += refund_calculation.total_refund_amount
                     currency = refund.totalRefundedSet.presentmentMoney.currencyCode or currency
                     
-                idempotency_manager.mark_operation_completed(idempotency_key, order.id, "refund", {"refunded": refund is not None, "result_id": refund.id})
+                idempotency_manager.mark_operation_completed(idempotency_key, order.id, "refund", {"result_id": refund.id, **refund_calculation.model_dump()})
 
             else:
                 logger.warning(
@@ -190,7 +196,7 @@ def process_refund_automation():
             "successful_refunds": successful_refunds,
             "failed_refunds": failed_refunds,
             "skipped_refunds": skipped_refunds,
-            "total_refunded_amount": total_refunded_amount,
+            "total_refunded_amount": f"{total_refunded_amount:.2f}",
             "currency": currency,
             "mode": EXECUTION_MODE
         }
@@ -280,13 +286,24 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
             refund_note += f" (${refund_calculation.total_refund_amount:.2f} of ${order_amount:.2f})"
         
         # Prepare GraphQL variables with calculated data
+
+        shipping = {}
+        if refund_calculation.refund_type == "FULL":
+            shipping = {
+                "fullRefund": True
+            }
+        else:
+            # For partial/prorated shipping refunds
+            pass
+
         variables = {
             "input": {
                 "notify": True,
                 "orderId": order.id,
                 "transactions": refund_calculation.transactions,
                 "refundLineItems": refund_calculation.line_items_to_refund,
-                "note": refund_note
+                "note": refund_note,
+                "shipping": shipping
             }
         }
         

@@ -24,6 +24,20 @@ MAX_SHOPIFY_ORDER_DATA = 10_000
 DEFAULT_CARRIER_CODE = 7041  # DHL Paket
 TRACKING_SEGMENT_SIZE = 40  # Maximum trackings per API call
 
+ELIGIBLE_ORDERS_QUERY = """
+financial_status:PAID OR
+financial_status:PARTIALLY_PAID OR
+financial_status:PARTIALLY_REFUNDED AND
+(return_status:RETURNED OR return_status:IN_PROGRESS)
+"""
+# ELIGIBLE_ORDERS_QUERY = """
+# financial_status:PAID
+# financial_status:PARTIALLY_PAID
+# financial_status:PARTIALLY_REFUNDED
+# return_status:RETURNED
+# return_status:IN_PROGRESS
+# """
+
 
 def __get_order_by_tracking_id(tracking_number: str, orders: list[ShopifyOrder]):
     for order in orders:
@@ -492,7 +506,7 @@ def __fetch_all_shopify_orders():
     # GraphQL variables for order filtering
     variables = {
         "first": REQUEST_PAGINATION_SIZE,
-        "query": "return_status:IN_PROGRESS financial_status:PAID",
+        "query": ELIGIBLE_ORDERS_QUERY,
     }
 
     # Loop through paginated results
@@ -661,7 +675,6 @@ def parse_graphql_order_data(node: dict):
 
     # Handle lineItems data - check if it's already structured or needs extraction
     line_items_data = node.get("lineItems", {})
-
     if isinstance(line_items_data, dict) and "nodes" in line_items_data:
         line_items = line_items_data["nodes"]
     elif isinstance(line_items_data, list):
@@ -669,20 +682,39 @@ def parse_graphql_order_data(node: dict):
     else:
         line_items = []
 
-    # Flatten nested return data for easier processing
-    for return_data in returns_nodes:
+    order_refunds = node.get("refunds", [])
+    if isinstance(order_refunds, dict) and "nodes" in order_refunds:
+        order_refunds = order_refunds["nodes"]
+    elif isinstance(order_refunds, list):
+        order_refunds = order_refunds
+    else:
+        order_refunds = []
 
-        return_line_items = return_data.get("returnLineItems", {})
+    # Flatten nested return data for easier processing
+    for refund in order_refunds:
+
+        return_line_items = refund.get("refundLineItems", {})
 
         if isinstance(return_line_items, dict) and "nodes" in return_line_items:
-            return_data["returnLineItems"] = return_line_items["nodes"]
+            refund["refundLineItems"] = return_line_items["nodes"]
         elif isinstance(return_line_items, list):
-            return_data["returnLineItems"] = return_line_items
+            refund["refundLineItems"] = return_line_items
         else:
-            return_data["returnLineItems"] = []
+            refund["refundLineItems"] = []
+
+    for refund in returns_nodes:
+
+        return_line_items = refund.get("returnLineItems", {})
+
+        if isinstance(return_line_items, dict) and "nodes" in return_line_items:
+            refund["returnLineItems"] = return_line_items["nodes"]
+        elif isinstance(return_line_items, list):
+            refund["returnLineItems"] = return_line_items
+        else:
+            refund["returnLineItems"] = []
 
         # Handle reverseFulfillmentOrders
-        reverse_fulfillments_data = return_data.get("reverseFulfillmentOrders", {})
+        reverse_fulfillments_data = refund.get("reverseFulfillmentOrders", {})
         if (
             isinstance(reverse_fulfillments_data, dict)
             and "nodes" in reverse_fulfillments_data
@@ -693,7 +725,7 @@ def parse_graphql_order_data(node: dict):
         else:
             reverse_fulfillments_orders_nodes = []
 
-        return_data["reverseFulfillmentOrders"] = reverse_fulfillments_orders_nodes
+        refund["reverseFulfillmentOrders"] = reverse_fulfillments_orders_nodes
 
         for r_fulfillment in reverse_fulfillments_orders_nodes:
             # Handle reverseDeliveries
@@ -713,4 +745,5 @@ def parse_graphql_order_data(node: dict):
     # Add the processed data to the node
     node["lineItems"] = line_items
     node["returns"] = returns_nodes
+    node["refunds"] = order_refunds
     return node

@@ -70,10 +70,10 @@ class RefundCalculator:
     def _get_returned_line_items(self, order: ShopifyOrder) -> List[ReturnLineItem]:
         """Extract returned line items from the order's return data."""
         returned_items = []
-
         for return_fulfillment in order.returns:
-            returned_items.extend(return_fulfillment.returnLineItems)
-
+            for li in return_fulfillment.returnLineItems:
+                if li.refundableQuantity:
+                    returned_items.append(li)
         return returned_items
 
     def _is_full_return(
@@ -86,6 +86,7 @@ class RefundCalculator:
         # Create a map of line item ID to returned quantity
         returned_qty_map = {}
         for returned_item in returned_line_items:
+            print(returned_item)
             line_item_id = returned_item.fulfillmentLineItem.lineItem.get("id")
             if line_item_id:
                 returned_qty_map[line_item_id] = (
@@ -109,7 +110,11 @@ class RefundCalculator:
 
         # For full refund, refund all line items with their full quantities
         refund_line_items = [
-            {"lineItemId": item.id, "quantity": item.refundableQuantity}
+            {
+                "lineItemId": item.id,
+                "quantity": item.refundableQuantity,
+                # "restockType": "RETURN",
+            }
             for item in order.lineItems
         ]
 
@@ -161,7 +166,11 @@ class RefundCalculator:
                 # Ensure we don't exceed refundable quantity
                 refund_qty = min(returned_qty, line_item.refundableQuantity)
                 refund_line_items.append(
-                    {"lineItemId": line_item.id, "quantity": refund_qty}
+                    {
+                        "lineItemId": line_item.id,
+                        "quantity": refund_qty,
+                        # "restockType": "RETURN",
+                    }
                 )
 
                 # Calculate proportional refund amount for this line item
@@ -285,7 +294,7 @@ class RefundCalculator:
                     ) / Decimal(str(original_line_item.quantity))
                     # For partial refunds, we need to determine how many units are being returned
                     # This would need to be passed from the calling function
-                    total_tax_refund += tax_per_unit
+                    total_tax_refund += tax_per_unit / Decimal(str(len(all_line_items)))
 
         return float(total_tax_refund.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 

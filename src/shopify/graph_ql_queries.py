@@ -1,6 +1,5 @@
 #
 
-
 RETURN_ORDERS_QUERY = """
 query ($first: Int, $after: String, $query: String) {
   orders(first: $first, after: $after, query: $query) {
@@ -151,6 +150,7 @@ query ($first: Int, $after: String, $query: String) {
                   quantity
                   returnReason
                   returnReasonNote
+                  refundableQuantity
                   fulfillmentLineItem {
                     id
                     lineItem {
@@ -191,12 +191,46 @@ query ($first: Int, $after: String, $query: String) {
             }
           }
         }
+        refunds(first: 10) {
+          createdAt
+          totalRefundedSet {
+            presentmentMoney {
+              amount
+              currencyCode
+            }
+          }
+          refundLineItems(first: 10) {
+            nodes {
+              lineItem {
+                id
+              }
+              quantity
+              restockType
+            }
+          }
+        }
       }
     }
   }
 }
 """
 
+RETURN_CLOSE_MUTATION = """
+mutation RefundLineItem($returnId: ID!) {
+  returnClose(id: $returnId) {
+    return {
+      id
+      status
+      closedAt
+    }
+    userErrors {
+      code
+      field
+      message
+    }
+  }
+}
+"""
 
 REFUND_CREATE_MUTATION = """
 mutation RefundLineItem($input: RefundInput!) {

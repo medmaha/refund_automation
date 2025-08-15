@@ -36,16 +36,19 @@ AUDIT_LOG_ENABLED = os.getenv("AUDIT_LOG_ENABLED", "true").lower() == "true"
 
 
 __automation_id = None
+
+
 def __get_automation_id():
 
     global __automation_id
-    
+
     if __automation_id:
         return __automation_id
-    
+
     import uuid
-    
+
     __automation_id = str(uuid.uuid4()).replace("-", "")[:16].upper()
     return __automation_id
+
 
 AUTOMATION_ID = __get_automation_id()

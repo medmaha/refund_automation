@@ -86,7 +86,6 @@ class RefundCalculator:
         # Create a map of line item ID to returned quantity
         returned_qty_map = {}
         for returned_item in returned_line_items:
-            print(returned_item)
             line_item_id = returned_item.fulfillmentLineItem.lineItem.get("id")
             if line_item_id:
                 returned_qty_map[line_item_id] = (

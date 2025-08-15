@@ -1,3 +1,4 @@
+import json
 import time
 
 import requests
@@ -12,6 +13,7 @@ from src.config import (
 from src.logger import get_logger
 from src.models.order import ShopifyOrder
 from src.models.tracking import TrackingData, TrackingStatus, TrackingSubStatus
+from src.utils.slack import slack_notifier
 
 from .graph_ql_queries import RETURN_ORDERS_QUERY
 
@@ -19,10 +21,25 @@ logger = get_logger(__name__)
 
 REQUEST_PAGINATION_SIZE = 12
 MAX_SHOPIFY_ORDER_DATA = 10_000
+DEFAULT_CARRIER_CODE = 7041  # DHL Paket
+TRACKING_SEGMENT_SIZE = 40  # Maximum trackings per API call
+
+ELIGIBLE_ORDERS_QUERY = """
+financial_status:PAID OR
+financial_status:PARTIALLY_PAID OR
+financial_status:PARTIALLY_REFUNDED AND
+(return_status:RETURNED OR return_status:IN_PROGRESS)
+"""
+# ELIGIBLE_ORDERS_QUERY = """
+# financial_status:PAID
+# financial_status:PARTIALLY_PAID
+# financial_status:PARTIALLY_REFUNDED
+# return_status:RETURNED
+# return_status:IN_PROGRESS
+# """
 
 
 def __get_order_by_tracking_id(tracking_number: str, orders: list[ShopifyOrder]):
-    logger.debug(f"Searching for order with tracking number: {tracking_number}")
     for order in orders:
         # Skip orders without valid return shipments
         if not order.valid_return_shipment:
@@ -31,83 +48,166 @@ def __get_order_by_tracking_id(tracking_number: str, orders: list[ShopifyOrder])
         for rf in order.valid_return_shipment.reverseFulfillmentOrders:
             for rd in rf.reverseDeliveries:
                 if rd.deliverable.tracking.number == tracking_number:
-                    logger.debug(f"Order found for tracking number: {tracking_number}")
                     return order
     logger.debug(f"No order found for tracking number: {tracking_number}")
 
 
 def __generate_tracking_payload(orders: list[ShopifyOrder]):
+    """Generate tracking payload from eligible orders."""
 
-    logger.info(f"Generating tracking payload for {len(orders)} orders")
+    logger.info(f"Generating tracking {len(orders)} orders")
     payload = []
 
     if len(orders) < 1:
         return payload
 
-    for order in orders:
-        carrier_code = None
-        tracking_number = None
+    try:
+        for order in orders:
+            carrier_code = None
+            tracking_number = None
 
-        # Skip if not return shipment available
-        if not order.valid_return_shipment:
-            continue
-
-        # Determine the return carrier
-        for index, rf in enumerate(
-            order.valid_return_shipment.reverseFulfillmentOrders
-        ):
-
-            has_reverse_deliveries = len(rf.reverseDeliveries) > 0
-
-            if not has_reverse_deliveries:
+            if not order.valid_return_shipment:
                 continue
 
-            deliverable = rf.reverseDeliveries[index].deliverable
+            for index, rfo in enumerate(
+                order.valid_return_shipment.reverseFulfillmentOrders
+            ):
 
-            if rf.reverseDeliveries and deliverable:
-                # Get carrier code from number
-                carrier_code = deliverable.tracking.carrierName
-                tracking_number = deliverable.tracking.number
+                if not len(rfo.reverseDeliveries) > 0:
+                    continue
 
-        if carrier_code and not carrier_code.isdigit():
-            logger.debug(
-                f"Carrier code '{carrier_code}' is not digit, setting to 7041 (DHL Paket)"
-            )
-            carrier_code = 7041  # DHL Paket
+                deliverable = rfo.reverseDeliveries[index].deliverable
 
-        if tracking_number:
-            logger.debug(
-                f"Adding tracking number: {tracking_number}, carrier: {carrier_code}"
-            )
-            payload.append({"number": tracking_number, "carrier": carrier_code})
+                if deliverable:
+                    carrier_code = deliverable.tracking.carrierName
+                    tracking_number = deliverable.tracking.number
+
+            if carrier_code and not carrier_code.isdigit():
+                carrier_code = DEFAULT_CARRIER_CODE
+
+            if tracking_number:
+                logger.debug(
+                    f"Adding tracking number: {tracking_number}, carrier: {carrier_code}"
+                )
+                payload.append({"number": tracking_number, "carrier": carrier_code})
+
+    except Exception as e:
+        logger.error(f"Failed to generate tracking payload -> error [{e}]")
+        return payload
 
     logger.info(f"Generated tracking payload with {len(payload)} entries")
     return payload
 
 
-def __register_trackings(payload: list):
+def __register_trackings(payload: list[dict]):
+    """Register tracking numbers with the tracking API using retry logic and better error handling."""
 
-    if len(payload) < 1:
+    idempotent_payloads = []
+
+    # TODO: Check the idempotency of the registering items
+    # To reduce unnecessary network bandwidth
+
+    if not payload:
+        if idempotent_payloads:
+            return
         return
 
     url = f"{TRACKING_BASE_URL}/register"
     headers = {"Content-Type": "application/json", "17token": TRACKING_API_KEY}
 
-    payload_segments = [payload[i : i + 40] for i in range(0, len(payload), 40)]
+    # Split payload into manageable segments
+    payload_segments = [
+        payload[i : i + TRACKING_SEGMENT_SIZE]
+        for i in range(0, len(payload), TRACKING_SEGMENT_SIZE)
+    ]
 
     logger.info(
         f"Registering {len(payload)} trackings in {len(payload_segments)} segments"
     )
-    for payload in payload_segments:
-        logger.debug(f"Registering tracking segment with {len(payload)} entries")
-        response = requests.post(
-            url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
-        )
-        response.raise_for_status()
-        accepted_trackings = response.json().get("data", {}).get("accepted", [])
-        rejected_trackings = response.json().get("data", {}).get("rejected", [])
-        logger.info(f"[Registered Trackings]: {len(accepted_trackings)}")
-        logger.info(f"[UnRegistered Trackings]: {len(rejected_trackings)}")
+
+    total_registered = 0
+    total_rejected = 0
+
+    for segment_idx, segment_payload in enumerate(payload_segments, 1):
+        try:
+            logger.debug(
+                f"Registering tracking segment {segment_idx}/{len(payload_segments)} with {len(segment_payload)} entries"
+            )
+
+            # Use retry mechanism from utils.retry
+            from src.utils.retry import exponential_backoff_retry
+
+            @exponential_backoff_retry(
+                exceptions=(
+                    requests.exceptions.RequestException,
+                    requests.exceptions.Timeout,
+                )
+            )
+            def _register_tracking_segment():
+                response = requests.post(
+                    url,
+                    headers=headers,
+                    json=json.dumps(payload_segments),
+                    timeout=REQUEST_TIMEOUT,
+                )
+                response.raise_for_status()
+                return response
+
+            response = _register_tracking_segment()
+            response_data = response.json()
+
+            accepted_trackings = response_data.get("data", {}).get("accepted", [])
+            rejected_trackings = response_data.get("data", {}).get("rejected", [])
+
+            total_registered += len(accepted_trackings)
+
+            # Later: filter out rejected with reason (already registered) and add to accepted
+            total_rejected += len(rejected_trackings)
+
+            logger.info(
+                f"Segment {segment_idx}: {len(accepted_trackings)} registered, {len(rejected_trackings)} rejected"
+            )
+
+            # Log rejected trackings for troubleshooting
+            if rejected_trackings:
+                logger.warning(
+                    f"Rejected trackings in segment {segment_idx}",
+                    extra={
+                        "rejected_count": len(rejected_trackings),
+                        "rejected_trackings": rejected_trackings,
+                    },
+                )
+
+        except requests.exceptions.RequestException as e:
+            logger.error(
+                f"Failed to register tracking segment {segment_idx}/{len(payload_segments)}: {e}",
+                extra={
+                    "segment_index": segment_idx,
+                    "segment_size": len(segment_payload),
+                    "error": str(e),
+                },
+            )
+            slack_notifier.send_error(
+                f"Failed to register tracking segment {segment_idx}",
+                details={"error": str(e), "segment_size": len(segment_payload)},
+            )
+            continue
+
+        except Exception as e:
+            logger.error(
+                f"Unexpected error registering tracking segment {segment_idx}: {e}",
+                extra={
+                    "segment_index": segment_idx,
+                    "segment_size": len(segment_payload),
+                    "error": str(e),
+                },
+                exc_info=True,
+            )
+            continue
+
+    logger.info(
+        f"Total tracking registration results: {total_registered} registered, {total_rejected} rejected"
+    )
 
 
 def __fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
@@ -115,67 +215,238 @@ def __fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
     Fetch tracking details for the given payload and match them with Shopify orders.
     """
     logger.info(f"Fetching tracking details for {len(payload)} payload entries")
+
+    if not payload:
+        logger.warning("Empty payload provided to fetch tracking details")
+        return []
+
     url = f"{TRACKING_BASE_URL}/gettrackinfo"
     headers = {"Content-Type": "application/json", "17token": TRACKING_API_KEY}
-    response = requests.post(
-        url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
-    )
-    response.raise_for_status()
+
+    try:
+        # Use retry mechanism from utils.retry
+        from src.utils.retry import exponential_backoff_retry
+
+        @exponential_backoff_retry(
+            exceptions=(
+                requests.exceptions.RequestException,
+                requests.exceptions.Timeout,
+            )
+        )
+        def _fetch_tracking_info():
+            response = requests.post(
+                url, headers=headers, json=payload, timeout=REQUEST_TIMEOUT
+            )
+            response.raise_for_status()
+            return response
+
+        response = _fetch_tracking_info()
+        response_data = response.json()
+
+    except requests.exceptions.RequestException as e:
+        logger.error(
+            f"Failed to fetch tracking details after retries: {e}",
+            extra={"payload_size": len(payload), "error": str(e)},
+        )
+        slack_notifier.send_error(
+            "Failed to fetch tracking details",
+            details={
+                "error": str(e),
+                "payload": str(payload),
+                "payload_size": len(payload),
+            },
+        )
+        return []
+
+    except Exception as e:
+        logger.error(
+            f"Unexpected error fetching tracking details: {e}",
+            extra={"payload_size": len(payload), "error": str(e)},
+            exc_info=True,
+        )
+        return []
 
     # List to hold tuples of (ShopifyOrder, TrackingData) for matched and valid trackings
     order_and_trackings: list[tuple[ShopifyOrder, TrackingData]] = []
 
     # Extract tracking data from the API response
-    trackings: list = response.json().get("data", {}).get("accepted")
-    logger.info(
-        f"Received {len(trackings) if trackings else 0} tracking entries from API"
-    )
+    trackings: list = response_data.get("data", {}).get("accepted", [])
+
+    if not trackings:
+        logger.warning("No tracking data received from API")
+        return []
+
+    logger.info(f"Received {len(trackings)} tracking entries from API")
+
+    parsing_errors = 0
+    processed_count = 0
+
+    matched_tracking_numbers: list[tuple[str, str]] = []
+    unmatched_tracking_numbers: list[tuple[str, str]] = []
 
     for tracking_data in trackings:
+        processed_count += 1
         try:
+            if not isinstance(tracking_data, dict):
+                logger.warning(f"Invalid tracking data format: {type(tracking_data)}")
+                parsing_errors += 1
+                continue
+
             _tracking = TrackingData(**tracking_data)
 
             # Find the corresponding Shopify order by tracking number
-            associated_order = __get_order_by_tracking_id(_tracking.number, orders)
+            corresponding_order = __get_order_by_tracking_id(_tracking.number, orders)
 
             # Skip if either tracking-info or associated-order is missing
-            if not (_tracking.track_info and associated_order):
+            if not (_tracking.track_info and corresponding_order):
                 logger.debug(
-                    f"Skipping tracking number: {_tracking.number} (missing info or order)"
+                    f"Skipping tracking number: {_tracking.number} (missing tracking info)",
+                    extra={
+                        "has_track_info": _tracking.track_info is not None,
+                        "has_associated_order": corresponding_order is not None,
+                    },
                 )
                 continue
 
-            # Extract tracking status and sub-status
-            tracking_status = _tracking.track_info.latest_status.status
-            tracking_sub_status = _tracking.track_info.latest_status.sub_status
+            # Extract tracking status and sub-status with validation
+            try:
+                tracking_status = _tracking.track_info.latest_status.status
+                tracking_sub_status = _tracking.track_info.latest_status.sub_status
+            except AttributeError as e:
+                logger.warning(
+                    f"Invalid tracking status structure for {_tracking.number}: {e}",
+                    extra={"tracking_number": _tracking.number},
+                )
+                continue
 
-            # Only add to result if status and sub-status match the return criteria
+            # Only add to result if
+            # status and sub-status match the return criteria
             if (
                 tracking_status == TrackingStatus.DELIVERED
                 and tracking_sub_status == TrackingSubStatus.DELIVERED_OTHER
             ):
-                logger.info(
-                    f"Tracking number {_tracking.number} matches return criteria"
+                order_and_trackings.append((corresponding_order, _tracking))
+                matched_tracking_numbers.append(
+                    (_tracking.number, corresponding_order.name)
                 )
-                order_and_trackings.append((associated_order, _tracking))
             else:
-                logger.debug(
-                    f"Tracking number {_tracking.number} does not match return criteria"
+                unmatched_tracking_numbers.append(
+                    (_tracking.number, corresponding_order.name)
                 )
+                logger.debug(
+                    f"Tracking number {_tracking.number} does not match return criteria",
+                    extra={
+                        "tracking_number": _tracking.number,
+                        "status": (
+                            tracking_status.value
+                            if hasattr(tracking_status, "value")
+                            else str(tracking_status)
+                        ),
+                        "sub_status": (
+                            tracking_sub_status.value
+                            if hasattr(tracking_sub_status, "value")
+                            else str(tracking_sub_status)
+                        ),
+                    },
+                )
+
+        except ValueError as e:
+            # Pydantic validation error
+            parsing_errors += 1
+            logger.error(
+                f"Validation error for tracking data: {e}",
+                extra={
+                    "tracking_number": tracking_data.get("number", "unknown"),
+                    "error": str(e),
+                },
+            )
 
         except Exception as e:
-            # Log any errors encountered during parsing
-            logger.error(f"[Parsing Error]: {tracking_data.get('number')} -- {e}")
+            # Any other parsing error
+            parsing_errors += 1
+            logger.error(
+                f"Parsing error for tracking data: {e}",
+                extra={
+                    "tracking_number": tracking_data.get("number", "unknown"),
+                    "error": str(e),
+                    "tracking_data_keys": (
+                        list(tracking_data.keys())
+                        if isinstance(tracking_data, dict)
+                        else None
+                    ),
+                },
+                exc_info=True,
+            )
 
-    logger.info(f"Matched {len(order_and_trackings)} orders with valid tracking data")
+    if matched_tracking_numbers:
+        logger.info(
+            "These tracking-numbers matches return criteria",
+            extra={
+                "status": TrackingStatus.DELIVERED.value,
+                "sub_status": TrackingSubStatus.DELIVERED_OTHER.value,
+                "payload": matched_tracking_numbers,
+            },
+        )
+        slack_payload = {
+            f"{item[1]}": f"Tracking({item[0]})" for item in matched_tracking_numbers
+        }
+        slack_payload.update(
+            {
+                "status": TrackingStatus.DELIVERED.value,
+                "sub_status": TrackingSubStatus.DELIVERED_OTHER.value,
+            }
+        )
+        slack_notifier.send_info(
+            "These tracking-numbers matches return criteria", details=slack_payload
+        )
+
+    if unmatched_tracking_numbers:
+        logger.info(
+            f"These tracking-numbers {_tracking.number} fails return criteria",
+            extra={"payload": matched_tracking_numbers},
+        )
+        slack_payload = {
+            f"{item[1]}": f"Tracking({item[0]})" for item in unmatched_tracking_numbers
+        }
+        slack_notifier.send_warning(
+            "These tracking-numbers fails return criteria", details=slack_payload
+        )
+
+    # Log summary statistics
+    logger.info(
+        f"Tracking details processing complete: {len(order_and_trackings)} matched, {parsing_errors} errors out of {processed_count} total",
+        extra={
+            "matched_orders": len(order_and_trackings),
+            "parsing_errors": parsing_errors,
+            "processed_count": processed_count,
+            "success_rate": (
+                f"{((processed_count - parsing_errors) / processed_count * 100):.1f}%"
+                if processed_count > 0
+                else "0%"
+            ),
+        },
+    )
+
+    if parsing_errors > 0:
+        slack_notifier.send_warning(
+            f"Tracking parsing completed with {parsing_errors} errors",
+            details={
+                "matched": len(order_and_trackings),
+                "errors": parsing_errors,
+                "total": processed_count,
+            },
+        )
+
     return order_and_trackings
 
 
 def __cleanup_shopify_orders(orders: list[ShopifyOrder]):
     """Clean up Shopify orders by filtering out orders with zero amount and those that do not require shipping."""
+
     logger.info(f"Cleaning up {len(orders)} Shopify orders")
-    # Initialize a list to hold cleaned orders
+
     cleaned_orders = []
+
     # Remove and get the last order from the list
     order = orders.pop()
 
@@ -191,6 +462,10 @@ def __cleanup_shopify_orders(orders: list[ShopifyOrder]):
             order = orders.pop()
         except IndexError:
             break
+        except Exception as e:
+            logger.error(
+                "Unhandled error while cleaning orders", extra={"error": str(e)}
+            )
 
     logger.info(f"Cleaned orders count: {len(cleaned_orders)}")
     return cleaned_orders
@@ -198,7 +473,7 @@ def __cleanup_shopify_orders(orders: list[ShopifyOrder]):
 
 def __fetch_shopify_orders(endpoint: str, headers: dict, variables: dict):
     # Making the GraphQL request to Shopify
-    
+
     response = requests.post(
         endpoint,
         headers=headers,
@@ -211,12 +486,11 @@ def __fetch_shopify_orders(endpoint: str, headers: dict, variables: dict):
 
     return response.json()
 
-def retrieve_fulfilled_shopify_orders():
-    """
-    Retrieve all matching shopify orders and merge them with their 17track tracking information
 
-    """
-    logger.info("Starting retrieval of fulfilled Shopify orders")
+def __fetch_all_shopify_orders():
+    """Fetch all shopify orders using pagination."""
+    logger.info("Starting retrieval of Shopify orders")
+
     headers = {
         "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
         "Content-Type": "application/json",
@@ -227,89 +501,175 @@ def retrieve_fulfilled_shopify_orders():
 
     cursor = None
     has_next_page = True
-
     orders: list[ShopifyOrder] = []
 
-    # graph-ql variables
+    # GraphQL variables for order filtering
     variables = {
         "first": REQUEST_PAGINATION_SIZE,
-        "query": "return_status:IN_PROGRESS, financial_status:PAID",
+        "query": ELIGIBLE_ORDERS_QUERY,
     }
 
-    # Loop through paginated Shopify orders until all are retrieved or the maximum is reached
+    # Loop through paginated results
     while has_next_page:
-
-        # Stop fetching if we've reached the maximum allowed number of orders
+        # Prevent infinite loops and memory issues
         if len(orders) >= MAX_SHOPIFY_ORDER_DATA:
-            logger.warning("Reached maximum allowed number of Shopify orders")
-            has_next_page = False
+            logger.warning(
+                f"Reached maximum order limit ({MAX_SHOPIFY_ORDER_DATA}), stopping pagination"
+            )
             break
 
-        # Set the cursor for pagination
+        # Set pagination cursor
         variables["after"] = cursor
 
-        logger.debug(f"Requesting Shopify orders page with cursor: {cursor}")
-        data = __fetch_shopify_orders(endpoint=endpoint, headers=headers, variables=variables)
+        logger.debug(f"Requesting orders page with cursor: {cursor}")
 
-        # Extract orders data from the response (graphQL)
-        orders_data = data.get("data", {}).get("orders", {})
-        edges = orders_data.get("edges", [])
-        errors = data.get("errors")
-
-        # Log any errors returned by Shopify
-        if errors:
-            logger.error(f"[Error]: {errors}")
-
-        logger.info(f"Fetched {len(edges)} orders from Shopify")
-        for edge in edges:
-            node = parse_graphql_order_data(edge["node"])
-            orders.append(ShopifyOrder(**node))
-
-        # Update pagination info for the next loop iteration
-        page_info = orders_data.get("pageInfo", {})
-        has_next_page = page_info.get("hasNextPage", False)
-        cursor = page_info.get("endCursor", None)
-
-        trackings = []
-
-        # If no orders were found, return an empty list
-        if not len(orders):
-            logger.info("No orders found, returning empty tracking list")
-            return trackings
-
-        # Clean up orders to remove those not eligible for processing (refunding)
-        cleaned_orders = __cleanup_shopify_orders(orders)
-
-        # If no cleaned orders remain, return an empty list
-        if not len(cleaned_orders):
-            logger.info(
-                "No cleaned orders remain after filtering, returning empty tracking list"
+        try:
+            data = __fetch_shopify_orders(
+                endpoint=endpoint, headers=headers, variables=variables
             )
-            return trackings
 
-        # Generate the payload for tracking registration
-        payload = __generate_tracking_payload(cleaned_orders)
+            # Extract and validate response data
+            orders_data = data.get("data", {}).get("orders", {})
+            edges = orders_data.get("edges", [])
+            errors = data.get("errors")
 
-        # Register all trackings with the tracking API
-        __register_trackings(payload)
+            if errors:
+                logger.error(f"Shopify API errors: {errors}")
+                slack_notifier.send_error(
+                    "Shopify API errors", details={"errors": errors}
+                )
 
-        # Wait for a short period to allow tracking registration to sync
-        logger.info("Waiting 5 seconds for tracking registration to sync")
-        time.sleep(5)
+            logger.info(f"Fetched {len(edges)} orders from Shopify")
 
-        # Fetch tracking details and match them with Shopify orders
-        trackings = __fetch_tracking_details(payload, cleaned_orders)
-        logger.info(f"Returning {len(trackings)} matched trackings")
+            # Process each order
+            for edge in edges:
+                try:
+                    node = parse_graphql_order_data(edge["node"])
+                    orders.append(ShopifyOrder(**node))
+                except Exception as e:
+                    logger.error(
+                        f"Error parsing order data: {e}",
+                        extra={"order_id": edge.get("node", {}).get("id", "unknown")},
+                    )
+                    continue
+
+            # Update pagination info
+            page_info = orders_data.get("pageInfo", {})
+            has_next_page = page_info.get("hasNextPage", False)
+            cursor = page_info.get("endCursor", None)
+
+        except Exception as e:
+            logger.error(
+                f"Failed to fetch Shopify orders: {e}",
+                extra={"variables": variables},
+                exc_info=True,
+            )
+            slack_notifier.send_error(
+                "Failed to fetch Shopify orders", details={"error": str(e), **variables}
+            )
+            break
+
+    logger.info(f"Successfully fetched {len(orders)} total orders")
+    return orders
+
+
+def __process_orders_for_tracking(orders: list[ShopifyOrder]):
+    """Process orders to generate and register tracking information."""
+    if not orders:
+        logger.info("No orders to process")
+        return []
+
+    logger.info(f"Processing {len(orders)} orders for tracking")
+    slack_notifier.send_info(f"Processing {len(orders)} orders for tracking")
+
+    # Clean up orders to remove ineligible ones
+    cleaned_orders = __cleanup_shopify_orders(
+        orders.copy()
+    )  # Use copy to avoid modifying original
+
+    if not cleaned_orders:
+        logger.info("No eligible orders remain after cleanup")
+        slack_notifier.send_info("No eligible orders found after filtering")
+        return []
+
+    logger.info(
+        f"Cleaned orders: {len(cleaned_orders)} eligible out of {len(orders)} total"
+    )
+    slack_notifier.send_info(
+        "Order filtering complete",
+        details={"eligible": len(cleaned_orders), "total": len(orders)},
+    )
+
+    # Generate tracking payload
+    payload = __generate_tracking_payload(cleaned_orders)
+
+    if not payload:
+        logger.warning("No tracking payload generated")
+        return []
+
+    # Register trackings with the API
+    __register_trackings(payload)
+
+    # Wait for tracking registration to sync
+    sync_delay = 5  # seconds
+    logger.info(f"Waiting {sync_delay} seconds for tracking registration to sync")
+    time.sleep(sync_delay)
+
+    # Fetch and match tracking details with orders
+    trackings = __fetch_tracking_details(payload, cleaned_orders)
+
+    logger.info(
+        f"Tracking processing complete: {len(trackings)} matched trackings",
+        extra={
+            "total_orders": len(orders),
+            "eligible_orders": len(cleaned_orders),
+            "matched_trackings": len(trackings),
+        },
+    )
+
+    return trackings
+
+
+def retrieve_refundable_shopify_orders():
+    """
+    Retrieve all matching Shopify orders and merge them with their 17track tracking information.
+
+    Returns:
+        List of tuples containing (ShopifyOrder, TrackingData) for eligible orders
+    """
+    logger.info("Starting retrieval of fulfilled Shopify orders")
+
+    try:
+        # Step 1: Fetch all relevant Shopify orders
+        orders = __fetch_all_shopify_orders()
+
+        if not orders:
+            logger.info("No orders fetched from Shopify")
+            return []
+
+        # Step 2: Process orders for tracking information
+        trackings = __process_orders_for_tracking(orders)
+
+        logger.info(
+            f"Order retrieval and tracking processing complete: {len(trackings)} final results"
+        )
+
         return trackings
+
+    except Exception as e:
+        error_msg = f"Failed to retrieve fulfilled Shopify orders: {e}"
+        logger.error(error_msg, exc_info=True)
+        slack_notifier.send_error(error_msg, details={"error": str(e)})
+        raise
 
 
 def parse_graphql_order_data(node: dict):
     # Handle returns data - check if it's already structured or needs extraction
-    returns_data = node.get("returns", {})
-    if isinstance(returns_data, dict) and "nodes" in returns_data:
-        returns_nodes = returns_data["nodes"]
-    elif isinstance(returns_data, list):
-        returns_nodes = returns_data
+    returns = node.get("returns", {})
+    if isinstance(returns, dict) and "nodes" in returns:
+        returns_nodes = returns["nodes"]
+    elif isinstance(returns, list):
+        returns_nodes = returns
     else:
         returns_nodes = []
 
@@ -322,10 +682,39 @@ def parse_graphql_order_data(node: dict):
     else:
         line_items = []
 
+    order_refunds = node.get("refunds", [])
+    if isinstance(order_refunds, dict) and "nodes" in order_refunds:
+        order_refunds = order_refunds["nodes"]
+    elif isinstance(order_refunds, list):
+        order_refunds = order_refunds
+    else:
+        order_refunds = []
+
     # Flatten nested return data for easier processing
-    for return_data in returns_nodes:
+    for refund in order_refunds:
+
+        return_line_items = refund.get("refundLineItems", {})
+
+        if isinstance(return_line_items, dict) and "nodes" in return_line_items:
+            refund["refundLineItems"] = return_line_items["nodes"]
+        elif isinstance(return_line_items, list):
+            refund["refundLineItems"] = return_line_items
+        else:
+            refund["refundLineItems"] = []
+
+    for refund in returns_nodes:
+
+        return_line_items = refund.get("returnLineItems", {})
+
+        if isinstance(return_line_items, dict) and "nodes" in return_line_items:
+            refund["returnLineItems"] = return_line_items["nodes"]
+        elif isinstance(return_line_items, list):
+            refund["returnLineItems"] = return_line_items
+        else:
+            refund["returnLineItems"] = []
+
         # Handle reverseFulfillmentOrders
-        reverse_fulfillments_data = return_data.get("reverseFulfillmentOrders", {})
+        reverse_fulfillments_data = refund.get("reverseFulfillmentOrders", {})
         if (
             isinstance(reverse_fulfillments_data, dict)
             and "nodes" in reverse_fulfillments_data
@@ -336,7 +725,7 @@ def parse_graphql_order_data(node: dict):
         else:
             reverse_fulfillments_orders_nodes = []
 
-        return_data["reverseFulfillmentOrders"] = reverse_fulfillments_orders_nodes
+        refund["reverseFulfillmentOrders"] = reverse_fulfillments_orders_nodes
 
         for r_fulfillment in reverse_fulfillments_orders_nodes:
             # Handle reverseDeliveries
@@ -356,4 +745,5 @@ def parse_graphql_order_data(node: dict):
     # Add the processed data to the node
     node["lineItems"] = line_items
     node["returns"] = returns_nodes
+    node["refunds"] = order_refunds
     return node

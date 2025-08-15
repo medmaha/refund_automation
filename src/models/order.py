@@ -58,6 +58,7 @@ class FulfillmentLineItem(BaseModel):
 class ReturnLineItem(BaseModel):
     id: str
     quantity: int
+    refundableQuantity: int = Field(default=0)
     returnReason: Optional[str] = Field(default=None)
     returnReasonNote: Optional[str] = Field(default=None)
     fulfillmentLineItem: FulfillmentLineItem
@@ -123,6 +124,18 @@ class SuggestedRefund(BaseModel):
     suggestedTransactions: Optional[List[SuggestedRefundSuggestedTransactions]]
 
 
+class RefundLineItems(BaseModel):
+    lineItem: dict
+    quantity: int
+    restockType: str
+
+
+class OrderRefunds(BaseModel):
+    createdAt: Optional[str] = Field(default=None)
+    totalRefundedSet: Optional[MoneyBagSet] = Field(default=None)
+    refundLineItems: Optional[list[RefundLineItems]] = Field(default_factory=list)
+
+
 class ShopifyOrder(BaseModel):
     id: str
     name: str
@@ -130,8 +143,15 @@ class ShopifyOrder(BaseModel):
     lineItems: List[LineItem]
     totalPriceSet: MoneyBagSet
     suggestedRefund: SuggestedRefund
+    refunds: List[OrderRefunds]
     returns: List[ReturnFulfillments]
     transactions: List[OrderTransaction]
+
+    return_id: Optional[str] = Field(default=None)
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.__filter_out_already_refunded_return_line_items()
 
     def __str__(self):
         return f"ShopifyOrder: ({self.name}, {self.totalPriceSet.shopMoney.amount})"
@@ -140,14 +160,65 @@ class ShopifyOrder(BaseModel):
         return f"ShopifyOrder(number={self.name}, priceAmount={self.totalPriceSet.shopMoney.amount})"
 
     @property
+    def is_eligible(self):
+        for return_fulfillment in self.returns:
+            if (
+                return_fulfillment.returnLineItems
+                and return_fulfillment.reverseFulfillmentOrders
+            ):
+                return True
+        return None
+
+    @property
     def valid_return_shipment(self):
-        for returns in self.returns:
-            for rfo in returns.reverseFulfillmentOrders:
+
+        if not self.is_eligible:
+            return None
+
+        for return_fulfillment in self.returns:
+            for rfo in return_fulfillment.reverseFulfillmentOrders:
                 for rd in rfo.reverseDeliveries:
                     if (
                         rd.deliverable.tracking.number
                         and rd.deliverable.tracking.carrierName
                     ):
-                        return returns
+                        self.return_id = return_fulfillment.id
+                        return return_fulfillment
 
         return None
+
+    def __filter_out_already_refunded_return_line_items(self):
+        refunded_line_item_quantities = {}
+
+        for refund in self.refunds:
+            if (
+                not refund.createdAt
+                or not refund.totalRefundedSet.presentmentMoney.amount
+            ):
+                continue
+
+            if refund.refundLineItems:
+                for refund_line_item in refund.refundLineItems:
+                    line_item_id = refund_line_item.lineItem["id"]
+                    refunded_quantity = refund_line_item.quantity
+                    if line_item_id in refunded_line_item_quantities:
+                        refunded_line_item_quantities[line_item_id] += refunded_quantity
+                    else:
+                        refunded_line_item_quantities[line_item_id] = refunded_quantity
+
+        for return_fulfillment in self.returns:
+            return_line_items = []
+            for return_line_item in return_fulfillment.returnLineItems:
+                line_item_id = return_line_item.fulfillmentLineItem.lineItem["id"]
+                return_quantity = return_line_item.quantity
+
+                refunded_quantity = refunded_line_item_quantities.get(line_item_id, 0)
+
+                if refunded_quantity >= return_quantity:
+                    continue
+                elif refunded_quantity > 0:
+                    return_line_item.quantity = return_quantity - refunded_quantity
+                    refunded_line_item_quantities[line_item_id] = return_quantity
+
+                return_line_items.append(return_line_item)
+            return_fulfillment.returnLineItems = return_line_items

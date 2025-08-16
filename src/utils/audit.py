@@ -1,17 +1,19 @@
 import json
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional
 from enum import Enum
+from typing import Any, Dict, Optional
+
 from src.config import AUDIT_LOG_DIR, AUDIT_LOG_ENABLED, DRY_RUN
 from src.logger import get_logger
-from src.utils.timezone import get_current_time_iso8601, format_datetime_for_log
+from src.utils.timezone import get_current_time_iso8601
 
 logger = get_logger(__name__)
 
 
 class AuditEventType(Enum):
     """Types of audit events."""
+
     REFUND_INITIATED = "refund_initiated"
     REFUND_COMPLETED = "refund_completed"
     REFUND_FAILED = "refund_failed"
@@ -26,36 +28,36 @@ class AuditEventType(Enum):
 
 class AuditLogger:
     """Handles audit logging for refund automation operations."""
-    
+
     def __init__(self, log_dir: str = AUDIT_LOG_DIR):
         self.log_dir = log_dir
         self.enabled = AUDIT_LOG_ENABLED
-        
+
         if self.enabled:
             os.makedirs(self.log_dir, exist_ok=True)
-    
+
     def _get_log_filename(self) -> str:
         """Generate audit log filename based on current date."""
         today = datetime.now().strftime("%Y-%m-%d")
-        return os.path.join(self.log_dir, f"audit_{today}.jsonl")
-    
+        return os.path.join(self.log_dir, f"audit_{today}.json")
+
     def _write_audit_entry(self, entry: Dict[str, Any]):
         """Write audit entry to log file."""
         if not self.enabled:
             return
-        
+
+        log_file = self._get_log_filename()
+
         if DRY_RUN:
-            logger.debug(f"DRY_RUN: Would write audit entry: {json.dumps(entry)}")
-            return
-        
+            log_file = "dry_run." + log_file
+
         try:
-            log_file = self._get_log_filename()
-            with open(log_file, 'a', encoding='utf-8') as f:
-                json.dump(entry, f, separators=(',', ':'))
-                f.write('\n')
+            with open(log_file, "a", encoding="utf-8") as f:
+                json.dump(entry, f, separators=(",", ":"))
+                f.write("\n")
         except Exception as e:
             logger.error(f"Failed to write audit entry: {e}", extra={"entry": entry})
-    
+
     def log_decision(
         self,
         event_type: AuditEventType,
@@ -67,11 +69,11 @@ class AuditLogger:
         references: Optional[Dict[str, str]] = None,
         api_status: Optional[str] = None,
         idempotency_key: Optional[str] = None,
-        additional_data: Optional[Dict[str, Any]] = None
+        additional_data: Optional[Dict[str, Any]] = None,
     ):
         """
         Log a decision event with comprehensive audit information.
-        
+
         Args:
             event_type: Type of audit event
             order_id: Shopify order ID
@@ -92,32 +94,27 @@ class AuditLogger:
             "decision_branch": decision_branch,
             "currency": currency,
             "mode": "DRY_RUN" if DRY_RUN else "LIVE",
-            "idempotency_key": idempotency_key
+            "idempotency_key": idempotency_key,
         }
-        
+
         # Add amounts if provided
         if amounts:
             entry["amounts"] = amounts
-        
+
         # Add references if provided
         if references:
             entry["references"] = references
-        
+
         # Add API status if provided
         if api_status:
             entry["api_status"] = api_status
-        
+
         # Add additional data if provided
         if additional_data:
             entry.update(additional_data)
-        
+
         self._write_audit_entry(entry)
-        
-        logger.info(
-            f"Audit: {event_type.value} for order {order_name} - branch: {decision_branch}",
-            extra=entry
-        )
-    
+
     def log_api_interaction(
         self,
         request_type: str,
@@ -126,11 +123,11 @@ class AuditLogger:
         request_id: Optional[str] = None,
         status_code: Optional[int] = None,
         response_time_ms: Optional[float] = None,
-        error: Optional[str] = None
+        error: Optional[str] = None,
     ):
         """
         Log API interactions for debugging and monitoring.
-        
+
         Args:
             request_type: Type of request (POST, GET, etc.)
             endpoint: API endpoint
@@ -147,31 +144,26 @@ class AuditLogger:
             "endpoint": endpoint,
             "order_id": order_id,
             "request_id": request_id,
-            "mode": "DRY_RUN" if DRY_RUN else "LIVE"
+            "mode": "DRY_RUN" if DRY_RUN else "LIVE",
         }
-        
+
         if status_code:
             entry["status_code"] = status_code
-        
+
         if response_time_ms:
             entry["response_time_ms"] = response_time_ms
-        
+
         if error:
             entry["error"] = error
-        
+
         self._write_audit_entry(entry)
-        
+
         if error:
             logger.error(
                 f"API {request_type} to {endpoint} - Status: {status_code or 'N/A'}",
-                extra=entry
+                extra=entry,
             )
-        else:
-            logger.info(
-                f"API {request_type} to {endpoint} - Status: {status_code or 'N/A'}",
-                extra=entry
-            )
-    
+
     def log_refund_decision(
         self,
         order_id: str,
@@ -182,14 +174,14 @@ class AuditLogger:
         tracking_number: Optional[str] = None,
         idempotency_key: Optional[str] = None,
         refund_id: Optional[str] = None,
-        error: Optional[str] = None
+        error: Optional[str] = None,
     ):
         """
         Log a refund decision with all relevant details.
-        
+
         Args:
             order_id: Shopify order ID
-            order_name: Shopify order name  
+            order_name: Shopify order name
             refund_amount: Amount to be refunded
             currency: Currency code
             decision: Decision made (processed/skipped/failed)
@@ -201,20 +193,20 @@ class AuditLogger:
         event_type_map = {
             "processed": AuditEventType.REFUND_COMPLETED,
             "failed": AuditEventType.REFUND_FAILED,
-            "skipped": AuditEventType.ORDER_SKIPPED
+            "skipped": AuditEventType.ORDER_SKIPPED,
         }
-        
+
         event_type = event_type_map.get(decision, AuditEventType.REFUND_INITIATED)
-        
+
         amounts = {"refund_amount": refund_amount}
         references = {"tracking_number": tracking_number} if tracking_number else {}
-        
+
         additional_data = {}
         if refund_id:
             additional_data["refund_id"] = refund_id
         if error:
             additional_data["error"] = error
-        
+
         self.log_decision(
             event_type=event_type,
             order_id=order_id,
@@ -224,15 +216,15 @@ class AuditLogger:
             currency=currency,
             references=references,
             idempotency_key=idempotency_key,
-            additional_data=additional_data
+            additional_data=additional_data,
         )
-    
+
     def log_duplicate_operation(
         self,
         order_id: str,
         order_name: str,
         idempotency_key: str,
-        original_timestamp: str
+        original_timestamp: str,
     ):
         """Log when a duplicate operation is detected."""
         self.log_decision(
@@ -243,36 +235,36 @@ class AuditLogger:
             idempotency_key=idempotency_key,
             additional_data={
                 "original_timestamp": original_timestamp,
-                "reason": "Operation already completed"
-            }
+                "reason": "Operation already completed",
+            },
         )
-    
+
     def get_audit_stats(self) -> Dict[str, Any]:
         """Get statistics about audit logging."""
         if not self.enabled:
             return {"enabled": False}
-        
+
         stats = {
             "enabled": True,
             "log_dir": self.log_dir,
-            "current_log_file": self._get_log_filename()
+            "current_log_file": self._get_log_filename(),
         }
-        
+
         # Try to get file size
         try:
             log_file = self._get_log_filename()
             if os.path.exists(log_file):
                 stats["log_file_size_bytes"] = os.path.getsize(log_file)
-                
+
                 # Count lines (entries)
-                with open(log_file, 'r') as f:
+                with open(log_file, "r") as f:
                     stats["total_entries"] = sum(1 for _ in f)
             else:
                 stats["log_file_size_bytes"] = 0
                 stats["total_entries"] = 0
         except Exception as e:
             stats["error"] = str(e)
-        
+
         return stats
 
 
@@ -289,7 +281,7 @@ def log_refund_audit(
     tracking_number: Optional[str] = None,
     idempotency_key: Optional[str] = None,
     refund_id: Optional[str] = None,
-    error: Optional[str] = None
+    error: Optional[str] = None,
 ):
     """Convenience function for logging refund decisions."""
     audit_logger.log_refund_decision(
@@ -301,5 +293,5 @@ def log_refund_audit(
         tracking_number=tracking_number,
         idempotency_key=idempotency_key,
         refund_id=refund_id,
-        error=error
+        error=error,
     )

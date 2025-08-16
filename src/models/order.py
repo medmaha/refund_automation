@@ -160,6 +160,14 @@ class ShopifyOrder(BaseModel):
         return f"ShopifyOrder(number={self.name}, priceAmount={self.totalPriceSet.shopMoney.amount})"
 
     @property
+    def tracking_number(self):
+
+        for rf in self.valid_return_shipment.reverseFulfillmentOrders:
+            for rd in rf.reverseDeliveries:
+                if rd.deliverable.tracking.number:
+                    return rd.deliverable.tracking.number
+
+    @property
     def is_eligible(self):
         for return_fulfillment in self.returns:
             if (

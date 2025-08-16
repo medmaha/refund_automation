@@ -12,6 +12,11 @@ from src.models.order import (
     RefundCreateResponse,
     ShopifyOrder,
 )
+from src.models.tracking import (
+    TrackingData,
+    TrackingStatus,
+    TrackingSubStatus,
+)
 from src.shopify.graph_ql_queries import REFUND_CREATE_MUTATION
 from src.shopify.orders import retrieve_refundable_shopify_orders
 from src.shopify.refund_calculator import RefundCalculationResult, refund_calculator
@@ -29,9 +34,7 @@ headers = {
     "Content-Type": "application/json",
 }
 
-
 EXECUTION_MODE = "LIVE" if not DRY_RUN else "DRY_RUN"
-
 
 def process_refund_automation():
     """Process fulfilled Shopify orders and handle refunds if eligible."""
@@ -60,7 +63,7 @@ def process_refund_automation():
         slack_notifier.send_error(error_msg, details={"error": str(e)})
         return sys.exit(1)
 
-    if not len(trackings):
+    if not trackings:
         logger.warning("No eligible tracking data found", extra={"trackings": len(trackings)})
         slack_notifier.send_warning("No eligible orders found for refund processing")
         return sys.exit(0)
@@ -71,7 +74,6 @@ def process_refund_automation():
     skipped_refunds = 0
     total_refunded_amount = 0.0
     currency = "USD"
-    
     refunded_orders = {}
 
     logger.info(f"Processing {len(trackings)} orders for potential refunds")
@@ -79,7 +81,7 @@ def process_refund_automation():
     for idx, order_and_tracking in enumerate(trackings):
         # Extract order and tracking first
         order, tracking = order_and_tracking
-        
+
         logger.info(
             f"Processing order {idx+1}/{len(trackings)} - {order.name}",
             extra={
@@ -89,64 +91,12 @@ def process_refund_automation():
             }
         )
 
-        refund_calculation = refund_calculator.calculate_refund(order, tracking)
-        refund_amount = refund_calculation.total_refund_amount
-        idempotency_key, is_duplicated = idempotency_manager.check_operation_idempotency(
-            order.id,
-            operation="refund",
-            refund_id=order.return_id,
-            tracking_no=tracking.number,
-            refund_amount=refund_amount
-        )
-
-        if is_duplicated:
-            logger.info(
-                f"Idempotency: Skipping Order: {order.id}-{order.name}",
-                extra={"idempotency_key": idempotency_key, "order_id": order.id}
-            )
-
-            # Log audit event for duplicate
-            audit_logger.log_duplicate_operation(
-                order_id=order.id,
-                order_name=order.name,
-                idempotency_key=idempotency_key,
-                original_timestamp="unknown"  # Could be enhanced to get from cache
-            )
-
-            # 
-            slack_notifier.send_error(f"Duplicate refund operation detected for order {order.name} - skipping", details={
-                "order_id": order.id,
-                "order_name": order.name,
-                "idempotency_key": idempotency_key,
-                "decision_branch": "duplicate_skipped"
-            })
-            
+        _cleaned_results = __full_clean_order(order, tracking, currency)
+        if not _cleaned_results:
             skipped_refunds += 1
             continue
 
-        latest_event = tracking.track_info.latest_event
-        
-        # Get tracking number for audit logging
-        tracking_number = tracking.number if tracking else None
-
-        if not latest_event:
-            logger.warning(
-                "No latest event found for tracking - skipping",
-                extra={"order_id": order.id, "order_name": order.name}
-            )
-            
-            # Log audit event for skipped order
-            log_refund_audit(
-                order_id=order.id,
-                order_name=order.name,
-                refund_amount=0.0,
-                currency=currency,
-                decision="skipped",
-                tracking_number=tracking_number,
-                error="No latest tracking event"
-            )
-            skipped_refunds += 1
-            continue
+        order, refund_calculation, idempotency_key  = _cleaned_results
 
         # Process refund with comprehensive error handling
         try:
@@ -173,8 +123,6 @@ def process_refund_automation():
                 )
                 failed_refunds += 1
 
-
-
         except Exception as e:
             logger.error(
                 f"Unexpected error processing order {order.name}: {e}",
@@ -188,8 +136,14 @@ def process_refund_automation():
                 details={"order_id": order.id, "error": str(e)}
             )
 
+    total_refunded_count = successful_refunds
+    if not total_refunded_count:
+        logger.warning("No eligible tracking data found", extra={"trackings": len(trackings)})
+        slack_notifier.send_warning("No refund processed", details={"orders":len(order_and_tracking), "successful_refunds":successful_refunds, "failed_refunds":failed_refunds, "skipped_refunds":skipped_refunds})
+        return sys.exit(0)
+
     # Log final summary
-    summary_msg = f"Refund processing completed: {successful_refunds} successful, {failed_refunds} failed, {skipped_refunds} skipped"
+    summary_msg = "Refund processing completed"
     logger.info(
         summary_msg,
         extra={
@@ -202,6 +156,7 @@ def process_refund_automation():
         }
     )
     
+
     # Send summary Slack notification
     slack_notifier.send_refund_summary(
         successful_refunds=successful_refunds,
@@ -215,6 +170,8 @@ def process_refund_automation():
             "Detailed refund results",
             extra={"refunded_orders": list(refunded_orders.keys())}
         )
+
+    sys.exit(0)
 
 
 def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None) -> Optional[RefundCreateResponse]:
@@ -265,7 +222,6 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
                     "decision_branch": "no_valid_transactions"
                 }
             )
-            
             # Log audit event
             log_refund_audit(
                 order_id=order.id,
@@ -277,7 +233,6 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
                 idempotency_key=idempotency_key,
                 error="No valid transactions for refund"
             )
-            
             return None
         
         # Use calculated refund data
@@ -292,9 +247,6 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
             shipping = {
                 "fullRefund": True
             }
-        else:
-            # For partial/prorated shipping refunds
-            pass
 
         variables = {
             "input": {
@@ -364,6 +316,9 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
                 }
             )
         
+        else:
+            raise ValueError("Refund Creation Failed")
+
         return refund
         
     except Exception as e:
@@ -398,7 +353,8 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
             details={
                 "order_id": order.id,
                 "order_name": order.name,
-                "error_type": type(e).__name__
+                "error_type": type(e).__name__,
+                "error":error_msg
             },
             request_id=request_id
         )
@@ -463,7 +419,14 @@ def _execute_shopify_refund(order: ShopifyOrder, variables: dict, request_id: st
             return None
         
         # Process Shopify response
-        response_data = data.get("data", {})
+        response_data = data.get("data") if data else None
+        if response_data is None:
+            logger.error(
+                f"No 'data' field in Shopify response for order {order.name}",
+                extra={"order_id": order.id, "request_id": request_id, "response": data}
+            )
+            return None
+
         user_errors = response_data.get("refundCreate", {}).get("userErrors", [])
         refund_data = response_data.get("refundCreate", {}).get("refund", None)
         
@@ -557,3 +520,105 @@ def _create_dry_run_refund(order: ShopifyOrder, refund_calculation:RefundCalcula
         totalRefundedSet=refund_money_set,
         createdAt=get_current_time_iso8601()
     )
+
+
+def __full_clean_order(order: ShopifyOrder, tracking: TrackingData, currency: str):
+
+    tracking_number = tracking.number if tracking else None
+
+    if not tracking_number:
+        logger.warning(
+            f"Missing tracking-no Order({order.name})",
+            extra={"order_id": order.id, "order_name": order.name}
+        )
+
+        # Log audit event for skipped order
+        log_refund_audit(
+            order_id=order.id,
+            order_name=order.name,
+            refund_amount=0.0,
+            currency=currency,
+            decision="skipped",
+            tracking_number=tracking_number,
+            error="No missing tracking number"
+        )
+
+        slack_notifier.send_warning(f"Missing tracking number: Order({order.name})", details={"order_id": order.id, "order_name": order.name})
+        return None
+
+    latest_event = tracking.track_info.latest_event
+    if not latest_event or not hasattr(tracking, "track_info"):
+        logger.warning(
+            "No latest event found for tracking - skipping",
+            extra={"order_id": order.id, "order_name": order.name}
+        )
+
+        # Log audit event for skipped order
+        log_refund_audit(
+            order_id=order.id,
+            order_name=order.name,
+            refund_amount=0.0,
+            currency=currency,
+            decision="skipped",
+            tracking_number=tracking_number,
+            error="No latest tracking event"
+        )
+        slack_notifier.send_warning(f"No latest tracking event: Order({order.name})", details={"order_id": order.id, "order_name": order.name, "delivery":str(latest_event or "N/A")})
+        return None
+
+    tracking_status = tracking.track_info.latest_status.status
+    tracking_sub_status = tracking.track_info.latest_status.sub_status
+
+    if tracking_status != TrackingStatus.DELIVERED or tracking_sub_status != TrackingSubStatus.DELIVERED_OTHER:
+        logger.warning(
+            f"Invalid tracking status for: Order({order.name})",
+            extra={"order_id": order.id, "order_name": order.name, "tracking_status":tracking_status, "tracking_sub_status":tracking_sub_status}
+        )
+
+        # Log audit event for skipped order
+        log_refund_audit(
+            order_id=order.id,
+            order_name=order.name,
+            refund_amount=0.0,
+            currency=currency,
+            decision="skipped",
+            tracking_number=tracking_number,
+            error=f"Invalid tracking status for: Order({order.name})"
+        )
+        slack_notifier.send_warning(f"Invalid tracking status for: Order({order.name})", details={"order_id": order.id, "order_name": order.name, "tracking_status":tracking_status, "tracking_sub_status":tracking_sub_status})
+        return None
+
+    refund_calculation = refund_calculator.calculate_refund(order, tracking)
+    idempotency_key, is_duplicated = idempotency_manager.check_operation_idempotency(
+        order.id,
+        operation="refund",
+        refund_id=order.return_id,
+        tracking_no=tracking.number,
+        refund_amount=refund_calculation.total_refund_amount
+    )
+
+    if is_duplicated:
+        logger.warning(
+            f"Idempotency: Skipping Order: {order.id}-{order.name}",
+            extra={"idempotency_key": idempotency_key, "order_id": order.id}
+        )
+
+        # Log audit event for duplicate
+        audit_logger.log_duplicate_operation(
+            order_id=order.id,
+            order_name=order.name,
+            idempotency_key=idempotency_key,
+            original_timestamp="unknown"  # Could be enhanced to get from cache
+        )
+
+        #
+        slack_notifier.send_warning(f"Duplicate refund operation detected for order {order.name} - skipping", details={
+            "order_id": order.id,
+            "order_name": order.name,
+            "idempotency_key": idempotency_key,
+            "decision_branch": "duplicate_skipped",
+            "investigate": "Verify that the order is actually refunded"
+        })
+        return None
+
+    return order, refund_calculation, idempotency_key

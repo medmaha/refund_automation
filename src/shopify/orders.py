@@ -45,11 +45,11 @@ def __get_order_by_tracking_id(tracking_number: str, orders: list[ShopifyOrder])
         if not order.valid_return_shipment:
             continue
 
-        for rf in order.valid_return_shipment.reverseFulfillmentOrders:
-            for rd in rf.reverseDeliveries:
-                if rd.deliverable.tracking.number == tracking_number:
-                    return order
+        if order.tracking_number == tracking_number:
+            return order
+
     logger.debug(f"No order found for tracking number: {tracking_number}")
+    return None
 
 
 def __generate_tracking_payload(orders: list[ShopifyOrder]):

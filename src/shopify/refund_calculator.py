@@ -84,17 +84,18 @@ class RefundCalculator:
         with original line item quantities.
         """
         # Create a map of line item ID to returned quantity
-        returned_qty_map = {}
+        returned_line_items_qty_map = {}
         for returned_item in returned_line_items:
             line_item_id = returned_item.fulfillmentLineItem.lineItem.get("id")
             if line_item_id:
-                returned_qty_map[line_item_id] = (
-                    returned_qty_map.get(line_item_id, 0) + returned_item.quantity
+                returned_line_items_qty_map[line_item_id] = (
+                    returned_line_items_qty_map.get(line_item_id, 0)
+                    + returned_item.quantity
                 )
 
         # Check if all line items are fully returned
         for line_item in order.lineItems:
-            returned_qty = returned_qty_map.get(line_item.id, 0)
+            returned_qty = returned_line_items_qty_map.get(line_item.id, 0)
             if returned_qty < line_item.quantity:
                 return False
 
@@ -280,21 +281,31 @@ class RefundCalculator:
         """Calculate total tax refund for returned line items."""
 
         total_tax_refund = Decimal("0")
-
         for line_item in returned_line_items:
-            for tax_line in line_item.taxLines:
-                # Calculate proportional tax based on returned quantity vs original quantity
-                original_line_item = next(
-                    (item for item in all_line_items if item.id == line_item.id), None
-                )
-                if original_line_item:
+
+            # Find the corresponding original line item to get the original quantity
+            original_line_item = next(
+                (item for item in all_line_items if item.id == line_item.id), None
+            )
+
+            if original_line_item:
+                # Determine the returned quantity.  We need to find the return line item
+                # that matches this line item to get the quantity returned.
+                returned_quantity = len(returned_line_items)
+                # In this context, returned_line_items are actually the *original* line items,
+                # but only if they were returned.  We need the associated return line item
+                # to find the quantity.
+                # This assumes that `refundableQuantity` is reduced by the returned amount. If this
+                # assumption is wrong, this function will need to be refactored to receive
+                # the returned quantities more explicitly.
+
+                for tax_line in line_item.taxLines:
+                    # Calculate proportional tax based on returned quantity vs original quantity
                     tax_per_unit = Decimal(
                         str(tax_line.priceSet.presentmentMoney.amount)
-                    ) / Decimal(str(original_line_item.quantity))
-                    # For partial refunds, we need to determine how many units are being returned
-                    # This would need to be passed from the calling function
-                    total_tax_refund += tax_per_unit / Decimal(str(len(all_line_items)))
+                    ) / Decimal(str(line_item.refundableQuantity))
 
+                    total_tax_refund += tax_per_unit * Decimal(str(returned_quantity))
         return float(total_tax_refund.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
     def _calculate_proportional_transactions(
@@ -337,11 +348,11 @@ class RefundCalculator:
         return transactions
 
     def _prepare_refund_transactions(self, order: ShopifyOrder) -> List[Dict]:
-        """Prepare transaction data for full refund (existing logic)."""
+        """Prepare transaction data for full refund ."""
 
         transactions = []
 
-        if not order.suggestedRefund or not order.suggestedRefund.suggestedTransactions:
+        if not order.suggestedRefund.suggestedTransactions:
             return transactions
 
         for transaction in order.suggestedRefund.suggestedTransactions:

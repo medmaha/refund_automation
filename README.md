@@ -1,6 +1,42 @@
-# 🔄 Shopify Refund Automation
+# Refund Automation System
 
-Automation system that streamlines Shopify refund processing by integrating with 17TRACK for package delivery verification. When returned items are confirmed as delivered back to the merchant, the system automatically processes refunds, reducing manual workload and improving customer experience.
+A robust, production-ready refund automation system for Shopify with comprehensive safety features, audit logging, and dual-mode operation.
+
+## 🎯 Requirements Implementation
+
+This implementation fulfills all the specified requirements:
+
+### ✅ DRY-RUN Toggle
+- **`DRY_RUN=true`**: Performs all reads and Slack alerts but makes no Shopify mutations
+- **`DRY_RUN=false`**: Makes actual Shopify API calls and processes real refunds  
+- Every test passes in both modes with identical logic and safety checks
+
+### ✅ Idempotency
+- Prevents double marking and double refunds using SHA-256 hashed keys
+- Persistent cache with configurable TTL (24h default)
+- Rerunning with same inputs produces identical outcomes
+- Works consistently in both DRY-RUN and LIVE modes
+
+### ✅ Time & Timezone Management  
+- All time comparisons use configurable store timezone
+- ISO8601 timestamps with timezone info in all logs
+- Proper timezone conversion and handling throughout
+
+### ✅ Rate Limiting & Retries
+- Exponential backoff with jitter for API calls
+- Configurable retry limits (3 default) and delays
+- Failed requests escalate to Slack with unique request IDs
+- Comprehensive error handling and recovery
+
+### ✅ Comprehensive Auditability
+Every decision is logged with:
+- Order ID, amounts & currency
+- External references (tracking numbers, etc.)
+- API statuses and response times
+- Decision branch (matched/unmatched/skipped/processed/failed)
+- Idempotency keys for tracking
+- Request IDs for debugging
+- Timestamps in store timezone
 
 ## 🎯 Key Features
 
@@ -61,7 +97,6 @@ Automation system that streamlines Shopify refund processing by integrating with
    TRACKING_API_URL=https://api.17track.net/track/v2.2
    
    # Shopify Configuration
-   SHOPIFY_API_KEY=your_shopify_api_key
    SHOPIFY_STORE_URL=your-store-name
    SHOPIFY_ACCESS_TOKEN=your_shopify_access_token
    
@@ -133,7 +168,6 @@ refund-automation/
 |----------|----------|-------------|----------|
 | `TRACKING_API_KEY` | ✅ | 17TRACK API authentication key | `your-17track-key` |
 | `TRACKING_API_URL` | ✅ | 17TRACK API base URL | `https://api.17track.net/track/v2.2` |
-| `SHOPIFY_API_KEY` | ✅ | Shopify Admin API key | `your-api-key` |
 | `SHOPIFY_STORE_URL` | ✅ | Your Shopify store name | `my-store` |
 | `SHOPIFY_ACCESS_TOKEN` | ✅ | Shopify access token with admin permissions | `shpat_xxxx` |
 | `LOG_LEVEL` | ❌ | Logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` |

@@ -17,38 +17,62 @@ jobs:
     container:
       image: python:3.12-slim
       options: --user root
-      
+
     steps:
       - name: Install git and necessary tools
         run: |
           apt-get update
           apt-get install -y git build-essential
 
-      # - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # - name: Install UV package Manager
-      #   run: pip install uv
+      - name: Install UV package Manager
+        run: pip install uv
 
-      # - name: Install dependencies using uv
-      #   run: uv sync --frozen
+      - name: Install dependencies using uv
+        run: uv sync --frozen
 
-      # - name: Run automation script
-      #   run: uv run main.py
-      #   env:
-      #     TRACKING_API_URL: ${{ secrets.TRACKING_API_URL }}
-      #     TRACKING_API_KEY: ${{ secrets.TRACKING_API_KEY }}
-      #     SHOPIFY_STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
-      #     SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+      - name: Run automation script
+        run: uv run main.py
+        env:
+          SHOPIFY_TIMEZONE: ${{ secrets.SHOPIFY_TIMEZONE }}
+          LOG_DIR: ${{ secrets.LOG_DIR }}
+          CACHE_DIR: ${{ secrets.CACHE_DIR }}
 
-      # - name: Set up Git
-      #   run: |
-      #     git config --global user.name "github-actions[bot]"
-      #     git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          DRY_RUN: ${{ secrets.DRY_RUN }}
 
-      # - name: Commit and push changes to main branch
-      #   run: |
-      #     git add .
-      #     git commit -m "Automated refund job: commit changes" || echo "No changes to commit"
-      #     git push origin HEAD:main
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRACKING_API_URL: ${{ secrets.TRACKING_API_URL }}
+          TRACKING_API_KEY: ${{ secrets.TRACKING_API_KEY }}
+
+          # Shopify
+          SHOPIFY_STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
+          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+
+          # Slack
+          SLACK_ENABLED: ${{ secrets.SLACK_ENABLED }}
+          SLACK_CHANNEL: ${{ secrets.SLACK_CHANNEL }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+          # Request & Retry Configuration
+          REQUEST_TIMEOUT: 15
+          MAX_RETRIES: 3
+          BASE_RETRY_DELAY: 1.0
+          MAX_RETRY_DELAY: 60.0
+
+          # Audit & Logging Configuration
+          LOG_LEVEL: DEBUG
+          AUDIT_LOG_DIR: ${{ secrets.AUDIT_LOG_DIR }}
+          AUDIT_LOG_ENABLED: ${{ secrets.AUDIT_LOG_ENABLED }}
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push changes to main branch
+        run: |
+          git add .
+          git commit -m "Automated refund job: commit changes" || echo "No changes to commit"
+          git push origin HEAD:main
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

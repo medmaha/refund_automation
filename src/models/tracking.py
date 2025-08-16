@@ -7,7 +7,7 @@ from pydantic import BaseModel
 class TrackingStatus(Enum):
     NOTFOUND = "NotFound"
     InfoReceived = "InfoReceived"
-    InTransit = "InTransit"
+    IN_TRANSIT = "InTransit"
     Expired = "Expired"
     AvailableForPickup = "AvailableForPickup"
     OutForDelivery = "OutForDelivery"
@@ -17,8 +17,9 @@ class TrackingStatus(Enum):
 
 
 class TrackingSubStatus(Enum):
-    NOTFOUND_OTHER = "NotFound_OTHER"
-    DELIVERED_OTHER = "Delivered_OTHER"
+    IN_TRANSIT_OTHER = "InTransit"
+    NOTFOUND_OTHER = "NotFound_Other"
+    DELIVERED_OTHER = "Delivered_Other"
     Exception_Returned = "Exception_Returned"
     Exception_Returning = "Exception_Returning"
 
@@ -34,8 +35,8 @@ class LatestEvent(BaseModel):
     time_utc: Optional[str]
     description: Optional[str]
     location: Optional[str]
-    stage: Optional[TrackingStatus]
-    sub_status: Optional[TrackingSubStatus]
+    stage: Optional[str]
+    sub_status: Optional[str]
 
 
 class Milestone(BaseModel):
@@ -54,7 +55,6 @@ class TrackingData(BaseModel):
     tag: str
     number: str
     carrier: int
-    param: Optional[str]
     track_info: Optional[TrackInfo]
 
     def __str__(self):

@@ -31,7 +31,7 @@ class TrackingSubStatus(Enum):
 class LatestStatus(BaseModel):
     status: Optional[TrackingStatus]
     sub_status: Optional[TrackingSubStatus]
-    sub_status_descr: Optional[str]
+    sub_status_descr: Optional[str] = Field(default="")
 
 
 class LatestEvent(BaseModel):
@@ -50,13 +50,13 @@ class Milestone(BaseModel):
 
 
 class TrackInfo(BaseModel):
-    milestone: List[Milestone]
     latest_status: LatestStatus
-    latest_event: Optional[LatestEvent]
+    milestone: List[Milestone] = Field(default_factory=list)
+    latest_event: Optional[LatestEvent] = Field(default=None)
 
 
 class TrackingData(BaseModel):
-    tag: Optional[str]
+    tag: Optional[str] = Field(default_factory=list)
     carrier: Optional[int]
     number: Optional[str]
     carrier_disagreement: Optional[dict] = Field(default_factory=dict)

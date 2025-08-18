@@ -9,6 +9,7 @@ from src.config import (
     SHOPIFY_STORE_URL,
     TRACKING_API_KEY,
     TRACKING_BASE_URL,
+    DEFAULT_CARRIER_CODE
 )
 from src.logger import get_logger
 from src.models.order import ShopifyOrder
@@ -21,7 +22,7 @@ logger = get_logger(__name__)
 
 REQUEST_PAGINATION_SIZE = 12
 MAX_SHOPIFY_ORDER_DATA = 10_000
-DEFAULT_CARRIER_CODE = 7041  # DHL Paket
+
 TRACKING_SEGMENT_SIZE = 40  # Maximum trackings per API call
 
 ELIGIBLE_ORDERS_QUERY = """
@@ -309,8 +310,8 @@ def __fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
 
             # Extract tracking status and sub-status with validation
             try:
-                tracking_status = _tracking.track_info.latest_status.status
-                tracking_sub_status = _tracking.track_info.latest_status.sub_status
+                tracking_status = _tracking.track_info.latest_status.status.value
+                tracking_sub_status = _tracking.track_info.latest_status.sub_status.value
             except AttributeError as e:
                 logger.warning(
                     f"Invalid tracking status structure for {_tracking.number}: {e}",
@@ -321,8 +322,8 @@ def __fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
             # Only add to result if
             # status and sub-status match the return criteria
             if (
-                tracking_status == TrackingStatus.DELIVERED
-                and tracking_sub_status == TrackingSubStatus.DELIVERED_OTHER
+                tracking_status == TrackingStatus.DELIVERED.value
+                and tracking_sub_status == TrackingSubStatus.DELIVERED_OTHER.value
             ):
                 order_and_trackings.append((corresponding_order, _tracking))
                 matched_tracking_numbers.append(

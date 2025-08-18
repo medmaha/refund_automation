@@ -9,7 +9,7 @@ from src.config import (
     SHOPIFY_STORE_URL,
     TRACKING_API_KEY,
     TRACKING_BASE_URL,
-    DEFAULT_CARRIER_CODE
+    DEFAULT_CARRIER_CODE,
 )
 from src.logger import get_logger
 from src.models.order import ShopifyOrder
@@ -311,7 +311,9 @@ def __fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
             # Extract tracking status and sub-status with validation
             try:
                 tracking_status = _tracking.track_info.latest_status.status.value
-                tracking_sub_status = _tracking.track_info.latest_status.sub_status.value
+                tracking_sub_status = (
+                    _tracking.track_info.latest_status.sub_status.value
+                )
             except AttributeError as e:
                 logger.warning(
                     f"Invalid tracking status structure for {_tracking.number}: {e}",
@@ -680,6 +682,9 @@ def parse_graphql_order_data(node: dict):
         line_items = line_items_data
     else:
         line_items = []
+
+    discount_applications = node.get("discountApplications", {}).get("edges", [])
+    node["discountApplications"] = discount_applications
 
     order_refunds = node.get("refunds", [])
     if isinstance(order_refunds, dict) and "nodes" in order_refunds:

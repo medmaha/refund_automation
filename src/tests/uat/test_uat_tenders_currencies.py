@@ -9,7 +9,6 @@ Tests payment method and currency scenarios:
 - B-C2: Prior partial refund exists → Only remaining refundable balance processed
 """
 
-import json
 from unittest.mock import patch
 
 from src.shopify.refund import refund_order

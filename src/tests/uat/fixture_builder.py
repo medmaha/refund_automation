@@ -38,7 +38,6 @@ class FixtureBuilder:
             line_items_total = self._order_data["base_amount"]
 
         discount_total = sum(d["amount"] for d in self._order_data["discounts"])
-        tax_rate = self._order_data["tax_rate"]
         tax_amount = self._order_data["tax_amount"]
         shipping_amount = self._order_data["shipping_amount"]
 

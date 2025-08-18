@@ -13,8 +13,8 @@ This module provides all fixtures needed to test the UAT scenarios matrix:
 Each fixture is designed to test specific business rules and edge cases.
 """
 
-from typing import Literal
 import uuid
+from typing import Literal
 from unittest.mock import Mock
 
 from src.models.order import (
@@ -232,9 +232,11 @@ class UATFixtureBuilder(FixtureBuilder):
                 "status": status,
                 "returnLineItems": [],
                 "reverseFulfillmentOrders": [],
-                "tracking_number": tracking_number
-                if tracking_number is not None
-                else UATConstants.TRACKING_NUMBER,
+                "tracking_number": (
+                    tracking_number
+                    if tracking_number is not None
+                    else UATConstants.TRACKING_NUMBER
+                ),
             }
         )
         return self
@@ -409,26 +411,30 @@ def get_mock_success_refund_response(
         "data": {
             "refundCreate": {
                 "refund": {
-                    "id": refund_id
-                    if refund_id
-                    else "gid://shopify/Refund/292ZNUZN8YZ2Z9N2N",
-                    "createdAt": created_at
-                    if created_at
-                    else timezone_handler.format_iso8601_with_tz(
-                        timezone_handler.get_current_time_store()
+                    "id": (
+                        refund_id
+                        if refund_id
+                        else "gid://shopify/Refund/292ZNUZN8YZ2Z9N2N"
+                    ),
+                    "createdAt": (
+                        created_at
+                        if created_at
+                        else timezone_handler.format_iso8601_with_tz(
+                            timezone_handler.get_current_time_store()
+                        )
                     ),
                     "totalRefundedSet": {
                         "presentmentMoney": {
                             "amount": str(amount),
-                            "currencyCode": currency
-                            if currency is not None
-                            else UATConstants.USD,
+                            "currencyCode": (
+                                currency if currency is not None else UATConstants.USD
+                            ),
                         },
-                        "presentmentMoney": {
+                        "shopMoney": {
                             "amount": str(amount),
-                            "currencyCode": currency
-                            if currency is not None
-                            else UATConstants.USD,
+                            "currencyCode": (
+                                currency if currency is not None else UATConstants.USD
+                            ),
                         },
                     },  # Partial
                 },
@@ -447,9 +453,11 @@ def get_mock_failure_refund_response(user_errors: list[dict] = None):
         "data": {
             "refundCreate": {
                 "refund": None,
-                "userErrors": user_errors
-                if user_errors is not None
-                else [{"message": "Payment method declined"}],
+                "userErrors": (
+                    user_errors
+                    if user_errors is not None
+                    else [{"message": "Payment method declined"}]
+                ),
             }
         }
     }

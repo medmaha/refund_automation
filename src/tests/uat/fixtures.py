@@ -1,9 +1,9 @@
 import pytest
+
 from src.tests.uat.uat_fixtures import get_mock_success_refund_response
 
-pytest.fixture
 
-
+@pytest.fixture
 def mock_post_side_effect(*args, **kwargs):
     return get_mock_success_refund_response(
         amount="60.0",

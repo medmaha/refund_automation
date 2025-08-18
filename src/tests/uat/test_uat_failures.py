@@ -12,15 +12,15 @@ from requests.exceptions import HTTPError, RequestException, Timeout
 
 from src.shopify.refund import process_refund_automation, refund_order
 from src.tests.uat.uat_fixtures import (
-    create_b_h1_order,
-    get_mock_failure_refund_response,
-    get_mock_success_refund_response,  # Single payment order for API failure tests
-)
-from src.tests.uat.uat_fixtures import (
     create_b_p2_order,  # Mixed payment order for testing partial failures
 )
 from src.tests.uat.uat_fixtures import (
+    get_mock_success_refund_response,  # Single payment order for API failure tests
+)
+from src.tests.uat.uat_fixtures import (
+    create_b_h1_order,
     create_delivered_tracking,
+    get_mock_failure_refund_response,
 )
 
 

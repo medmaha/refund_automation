@@ -260,7 +260,7 @@ class TestCarrierSystemDisagreementScenarios:
             False,
         )
 
-        order, info = create_b_h1_order()
+        order, _ = create_b_h1_order()
         tracking = create_carrier_mismatch_tracking()
 
         # Verify tracking has carrier disagreement data
@@ -713,7 +713,7 @@ class TestTrackingExceptionIntegration:
                 "Successful tracking should result in success"
             )
 
-            mock_sys_exit.assert_not_called
+            mock_sys_exit.assert_not_called()
 
         # Test exception scenario
         exception_tracking = create_attempted_delivery_tracking()

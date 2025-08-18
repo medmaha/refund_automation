@@ -73,7 +73,7 @@ class TestFullReturnScenarios:
 
         calculation = refund_calculator.calculate_refund(order, tracking)
 
-        calculation.refund_type == "FULL"
+        assert calculation.refund_type == "FULL"
         expected_total_refund = calculation.total_refund_amount
 
         # Mock successful Shopify API response for Live mode

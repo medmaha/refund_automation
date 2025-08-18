@@ -11,7 +11,7 @@ Tests timing constraints and idempotency scenarios:
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from src.shopify.refund import refund_order
 from src.tests.uat.uat_fixtures import (

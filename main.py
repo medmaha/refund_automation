@@ -2,9 +2,8 @@ import sys
 
 from fastapi import FastAPI
 
-from src.config import DRY_RUN, AUTOMATION_ID
+from src.config import AUTOMATION_ID, DRY_RUN
 from src.logger import get_logger
-
 
 app = FastAPI()
 

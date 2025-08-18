@@ -367,7 +367,7 @@ class RefundCalculator:
             original_transaction_amount = Decimal(
                 str(suggested_transaction.amountSet.presentmentMoney.amount)
             )
-            
+
             proportional_amount = original_transaction_amount * proportion
 
             transaction_data = {
@@ -408,8 +408,7 @@ class RefundCalculator:
     ) -> float:
         try:
             value_decimal = Decimal(str(value))
-        except:
-            print(value, type(value))
+        except Exception as _:
             value_decimal = Decimal(value)
         quantize_str = f"1.{'0' * decimal_places}"
         normalized = value_decimal.quantize(Decimal(quantize_str), rounding=ROUND_DOWN)

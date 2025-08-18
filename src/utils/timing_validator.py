@@ -142,7 +142,7 @@ class DeliveryTimingValidator:
                 },
             )
             if delivered_at:
-                raise ValueError(delivered_at)
+                raise ValueError(delivered_at) from e
             raise
 
     def get_earliest_eligible_time(self, delivery_time: datetime) -> datetime:

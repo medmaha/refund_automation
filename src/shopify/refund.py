@@ -8,7 +8,7 @@ import requests
 
 from src.config import DRY_RUN, REQUEST_TIMEOUT, SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_URL
 from src.logger import get_logger
-from src.models.order import RefundCreateResponse, ShopifyOrder, ReturnFulfillments
+from src.models.order import RefundCreateResponse, ReturnFulfillments, ShopifyOrder
 from src.models.tracking import (
     TrackingData,
     TrackingStatus,
@@ -18,11 +18,11 @@ from src.shopify.graph_ql_queries import REFUND_CREATE_MUTATION
 from src.shopify.orders import retrieve_refundable_shopify_orders
 from src.shopify.refund_calculator import refund_calculator
 from src.utils.audit import audit_logger, log_refund_audit
+from src.utils.dry_run import create_dry_run_refund
 from src.utils.idempotency import idempotency_manager
 from src.utils.retry import exponential_backoff_retry
 from src.utils.slack import slack_notifier
 from src.utils.timezone import get_current_time_iso8601, timezone_handler
-from src.utils.dry_run import create_dry_run_refund
 from src.utils.timing_validator import validate_refund_timing
 
 logger = get_logger(__name__)
@@ -96,10 +96,10 @@ def process_refund_automation():
             refund = refund_order(order, tracking)
             if refund:
                 logger.info(
-                    "Refund processed successfully",
+                    f"Successfully refunded Order({order.name})",
                     extra={
-                        "refund_id": refund.id,
                         "order_id": order.id,
+                        "refund_id": refund.id,
                         "order_name": order.name,
                     },
                 )
@@ -322,6 +322,8 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
                     "order_id": order.id,
                     "refund_id": refund.id,
                     "request_id": request_id,
+                    "order_name": order.name,
+                    "tracking_number": tracking_number,
                     **refund_calculation.model_dump(
                         exclude=["line_items_to_refund", "transactions"]
                     ),
@@ -332,20 +334,30 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
                 f"Refund successfully processed for order {order.name}",
                 extra={
                     "order_id": order.id,
-                    "order_name": order.name,
                     "refund_id": refund.id,
-                    "refund_amount": refund_calculation.total_refund_amount,
-                    "currency": currency,
                     "request_id": request_id,
-                    "decision_branch": "processed",
+                    "order_name": order.name,
+                    "tracking_number": tracking_number,
+                    **refund_calculation.model_dump(
+                        exclude=["line_items_to_refund", "transactions"]
+                    ),
                 },
             )
 
             idempotency_manager.mark_operation_completed(
                 idempotency_key,
-                order.id,
-                "refund",
-                {"result_id": refund.id, "results": refund_calculation.model_dump()},
+                order_id=order.id,
+                operation="refund",
+                result={
+                    "order_id": order.id,
+                    "refund_id": refund.id,
+                    "request_id": request_id,
+                    "order_name": order.name,
+                    "tracking_number": tracking_number,
+                    **refund_calculation.model_dump(
+                        exclude=["line_items_to_refund", "transactions"]
+                    ),
+                },
             )
 
         else:
@@ -580,20 +592,23 @@ def __full_clean_order(order: ShopifyOrder, tracking: TrackingData):
             extra_log_details = {}
 
             log_decision = "skipped"
-            inv_tag = inv_tag.upper()
+            inv_tag = inv_tag.lower()
             err_message = f'Invalid tag detected "{inv_tag}"'
 
             "Force should override blocking conditions"
             if force_refund:
                 extra_log_details.update(
                     {
-                        "action": "override",
-                        "reason": f'Bypassing validation because of the "{inv_tag}"',
+                        "tag": inv_tag,
+                        "action": "immediately processed the refund",
+                        "reason": f'Bypassed validation checks because of the "{inv_tag}"',
                     }
                 )
                 log_decision = "bypass_blocking" if not is_auto_off else log_decision
-                err_message += (
-                    " | Warning(Force Override) |" if not is_auto_off else err_message
+                err_message = (
+                    f"Force refund detected for Order({order.name}) | Warning(Force Override) |"
+                    if not is_auto_off
+                    else err_message
                 )
 
             if is_auto_off:
@@ -719,7 +734,7 @@ def __full_clean_order(order: ShopifyOrder, tracking: TrackingData):
                 "reason", "Tracking failed timing validation"
             )
             logger.warning(
-                "No latest event found for tracking - skipping",
+                err_message,
                 extra={
                     "order_id": order.id,
                     "order_name": order.name,

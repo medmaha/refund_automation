@@ -144,7 +144,7 @@ class ShopifyOrder(BaseModel):
     lineItems: List[LineItem]
     totalPriceSet: MoneyBagSet
     totalRefundedShippingSet: Optional[MoneyBagSet] = Field(default=None)
-    discountApplications: List[DiscountApplication] = Field(default_factory=list)
+    discountApplications: List[dict] = Field(default_factory=list)
     suggestedRefund: SuggestedRefund
     refunds: List[OrderRefunds]
     returns: List[ReturnFulfillments]
@@ -169,11 +169,12 @@ class ShopifyOrder(BaseModel):
         return self.get_tracking_number()
 
     def get_tracking_number(self):
-        if self.valid_return_shipment:
-            for rf in self.valid_return_shipment.reverseFulfillmentOrders:
-                for rd in rf.reverseDeliveries:
-                    if rd.deliverable.tracking.number:
-                        return rd.deliverable.tracking.number
+        for _return in self.returns:
+            if _return.status == "OPEN":
+                for rfo in _return.reverseFulfillmentOrders:
+                    for rd in rfo.reverseDeliveries:
+                        if rd.deliverable.tracking.number:
+                            return rd.deliverable.tracking.number
         return None
 
     @property
@@ -187,19 +188,21 @@ class ShopifyOrder(BaseModel):
 
     @property
     def valid_return_shipment(self):
+        """
+        Helper method to get the first valid return shipment from the order.
+        * Can also be used as a flag.
+        """
+
         for return_fulfillment in self.returns:
-            if not (
-                return_fulfillment.returnLineItems
+            if (
+                return_fulfillment.status == "OPEN"
+                and return_fulfillment.returnLineItems
                 and return_fulfillment.reverseFulfillmentOrders
             ):
-                continue
-            for rfo in return_fulfillment.reverseFulfillmentOrders:
-                for rd in rfo.reverseDeliveries:
-                    if (
-                        rd.deliverable.tracking.number
-                        and rd.deliverable.tracking.carrierName
-                    ):
-                        return return_fulfillment
+                for rfo in return_fulfillment.reverseFulfillmentOrders:
+                    for rd in rfo.reverseDeliveries:
+                        if rd.deliverable.tracking.number:
+                            return return_fulfillment
 
         return None
 

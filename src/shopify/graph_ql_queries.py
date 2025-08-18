@@ -189,7 +189,6 @@ query ($first: Int, $after: String, $query: String) {
           refundShippingLines(first: 5) {
             edges {
               node {
-                id
                 subtotalAmountSet {
                   presentmentMoney {
                     amount

@@ -9,7 +9,7 @@ from src.config import (
     SHOPIFY_STORE_URL,
     TRACKING_API_KEY,
     TRACKING_BASE_URL,
-    DEFAULT_CARRIER_CODE
+    DEFAULT_CARRIER_CODE,
 )
 from src.logger import get_logger
 from src.models.order import ShopifyOrder
@@ -311,7 +311,9 @@ def __fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
             # Extract tracking status and sub-status with validation
             try:
                 tracking_status = _tracking.track_info.latest_status.status.value
-                tracking_sub_status = _tracking.track_info.latest_status.sub_status.value
+                tracking_sub_status = (
+                    _tracking.track_info.latest_status.sub_status.value
+                )
             except AttributeError as e:
                 logger.warning(
                     f"Invalid tracking status structure for {_tracking.number}: {e}",
@@ -664,11 +666,11 @@ def retrieve_refundable_shopify_orders():
 
 def parse_graphql_order_data(node: dict):
     # Handle returns data - check if it's already structured or needs extraction
-    returns = node.get("returns", {})
-    if isinstance(returns, dict) and "nodes" in returns:
-        returns_nodes = returns["nodes"]
-    elif isinstance(returns, list):
-        returns_nodes = returns
+    _return = node.get("returns", {})
+    if isinstance(_return, dict) and "nodes" in _return:
+        returns_nodes = _return["nodes"]
+    elif isinstance(_return, list):
+        returns_nodes = _return
     else:
         returns_nodes = []
 
@@ -681,6 +683,9 @@ def parse_graphql_order_data(node: dict):
     else:
         line_items = []
 
+    discount_applications = node.get("discountApplications", {}).get("edges", [])
+    node["discountApplications"] = discount_applications
+
     order_refunds = node.get("refunds", [])
     if isinstance(order_refunds, dict) and "nodes" in order_refunds:
         order_refunds = order_refunds["nodes"]
@@ -689,7 +694,7 @@ def parse_graphql_order_data(node: dict):
     else:
         order_refunds = []
 
-    # Flatten nested return data for easier processing
+    # Flatten nested refund data for easier processing
     for refund in order_refunds:
         return_line_items = refund.get("refundLineItems", {})
 
@@ -700,18 +705,21 @@ def parse_graphql_order_data(node: dict):
         else:
             refund["refundLineItems"] = []
 
-    for refund in returns_nodes:
-        return_line_items = refund.get("returnLineItems", {})
+        refund["refundShippingLines"] = refund.get("refundShippingLines", {}).get("edges", [])
+
+    # Flatten nested return data for easier processing
+    for _return in returns_nodes:
+        return_line_items = _return.get("returnLineItems", {})
 
         if isinstance(return_line_items, dict) and "nodes" in return_line_items:
-            refund["returnLineItems"] = return_line_items["nodes"]
+            _return["returnLineItems"] = return_line_items["nodes"]
         elif isinstance(return_line_items, list):
-            refund["returnLineItems"] = return_line_items
+            _return["returnLineItems"] = return_line_items
         else:
-            refund["returnLineItems"] = []
+            _return["returnLineItems"] = []
 
         # Handle reverseFulfillmentOrders
-        reverse_fulfillments_data = refund.get("reverseFulfillmentOrders", {})
+        reverse_fulfillments_data = _return.get("reverseFulfillmentOrders", {})
         if (
             isinstance(reverse_fulfillments_data, dict)
             and "nodes" in reverse_fulfillments_data
@@ -722,7 +730,7 @@ def parse_graphql_order_data(node: dict):
         else:
             reverse_fulfillments_orders_nodes = []
 
-        refund["reverseFulfillmentOrders"] = reverse_fulfillments_orders_nodes
+        _return["reverseFulfillmentOrders"] = reverse_fulfillments_orders_nodes
 
         for r_fulfillment in reverse_fulfillments_orders_nodes:
             # Handle reverseDeliveries

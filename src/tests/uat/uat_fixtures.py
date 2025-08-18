@@ -418,7 +418,7 @@ def get_mock_success_refund_response(
                         timezone_handler.get_current_time_store()
                     ),
                     "totalRefundedSet": {
-                        "shopMoney": {
+                        "presentmentMoney": {
                             "amount": str(amount),
                             "currencyCode": currency
                             if currency is not None
@@ -542,7 +542,7 @@ def create_b_d2_order(
     full_refund=False, with_shipping=False
 ) -> tuple[ShopifyOrder, dict]:
     """B-D2: Line-level fixed discount."""
-    item_1_qty = 2
+    item_1_qty = 2  # 120
     item_2_qty = 1
     item_1_amount = 60.0
     item_2_amount = 45.99

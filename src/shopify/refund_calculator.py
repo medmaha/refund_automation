@@ -367,6 +367,7 @@ class RefundCalculator:
             original_transaction_amount = Decimal(
                 str(suggested_transaction.amountSet.presentmentMoney.amount)
             )
+            
             proportional_amount = original_transaction_amount * proportion
 
             transaction_data = {

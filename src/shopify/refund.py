@@ -789,9 +789,8 @@ def __full_clean_order(order: ShopifyOrder, tracking: TrackingData):
     idempotency_key, is_duplicated = idempotency_manager.check_operation_idempotency(
         order.id,
         operation="refund",
-        refund_id=order.return_id,
         tracking_no=tracking.number,
-        refund_amount=refund_calculation.total_refund_amount,
+        delivered_at_iso=latest_event.time_iso,
     )
 
     if is_duplicated:

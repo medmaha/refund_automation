@@ -11,7 +11,7 @@ class MoneyBag(BaseModel):
 
 class MoneyBagSet(BaseModel):
     presentmentMoney: MoneyBag
-    shopMoney: MoneyBag = Field(default=None)
+    shopMoney: Optional[MoneyBag] = Field(default=None)
 
 
 class DeliverableTracking(BaseModel):
@@ -97,11 +97,6 @@ class OrderTransaction(BaseModel):
     orderId: Optional[str] = Field(default=None)
 
 
-class SuggestedRefundRefundDuties(BaseModel):
-    amountSet: MoneyBagSet
-    originalDuty: Optional[str] = Field(default=None)
-
-
 class SuggestedRefundRefundShipping(BaseModel):
     amountSet: MoneyBagSet
 
@@ -120,7 +115,6 @@ class SuggestedRefundSuggestedTransactions(BaseModel):
 class SuggestedRefund(BaseModel):
     amountSet: MoneyBagSet
     shipping: SuggestedRefundRefundShipping
-    refundDuties: list[SuggestedRefundRefundDuties]
     suggestedTransactions: Optional[List[SuggestedRefundSuggestedTransactions]]
 
 
@@ -134,6 +128,13 @@ class OrderRefunds(BaseModel):
     createdAt: Optional[str] = Field(default=None)
     totalRefundedSet: Optional[MoneyBagSet] = Field(default=None)
     refundLineItems: Optional[list[RefundLineItems]] = Field(default_factory=list)
+    refundShippingLines: list[dict] = Field(default_factory=list)
+
+
+class DiscountApplication(BaseModel):
+    allocationMethod: str
+    targetSelection: str
+    targetType: str
 
 
 class ShopifyOrder(BaseModel):
@@ -142,6 +143,8 @@ class ShopifyOrder(BaseModel):
     tags: List[str]
     lineItems: List[LineItem]
     totalPriceSet: MoneyBagSet
+    totalRefundedShippingSet: Optional[MoneyBagSet] = Field(default=None)
+    discountApplications: List[DiscountApplication] = Field(default_factory=list)
     suggestedRefund: SuggestedRefund
     refunds: List[OrderRefunds]
     returns: List[ReturnFulfillments]
@@ -154,10 +157,12 @@ class ShopifyOrder(BaseModel):
         self.__filter_out_already_refunded_return_line_items()
 
     def __str__(self):
-        return f"ShopifyOrder: ({self.name}, {self.totalPriceSet.shopMoney.amount})"
+        return (
+            f"ShopifyOrder: ({self.name}, {self.totalPriceSet.presentmentMoney.amount})"
+        )
 
     def __repr__(self):
-        return f"ShopifyOrder(number={self.name}, priceAmount={self.totalPriceSet.shopMoney.amount})"
+        return f"ShopifyOrder(number={self.name}, priceAmount={self.totalPriceSet.presentmentMoney.amount})"
 
     @property
     def tracking_number(self):
@@ -194,7 +199,6 @@ class ShopifyOrder(BaseModel):
                         rd.deliverable.tracking.number
                         and rd.deliverable.tracking.carrierName
                     ):
-                        self.return_id = return_fulfillment.id
                         return return_fulfillment
 
         return None

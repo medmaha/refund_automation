@@ -33,6 +33,7 @@ financial_status:PARTIALLY_REFUNDED AND
 (fulfillment_status:FULFILLED OR fulfillment_status:PARTIALLY_FULFILLED)
 """
 
+
 def __cleanup_shopify_orders(orders: list[ShopifyOrder]):
     logger.info(f"Cleaning up {len(orders)} Shopify orders")
 

@@ -8,7 +8,7 @@ This module implements the business rules:
 """
 
 from decimal import ROUND_DOWN, Decimal
-from typing import Dict, List, Union
+from typing import Dict, List, Literal, Union
 
 from pydantic import BaseModel
 
@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 class RefundCalculationResult(BaseModel):
     """Result of refund calculations."""
 
-    refund_type: str
+    refund_type: Literal["FULL", "PARTIAL"]
     total_refund_amount: float
     line_items_to_refund: List[Dict]
     transactions: List[Dict]

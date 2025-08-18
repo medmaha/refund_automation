@@ -9,7 +9,6 @@ from src.tests.uat.uat_fixtures import UATFixtureBuilder, create_delivered_track
 TEST_TRACKING_NUMBER = "DUMMY923456TEST"
 
 
-
 @pytest.fixture
 def dummy_order():
     return (
@@ -41,4 +40,3 @@ def dummy_orders_with_invalid_returns():
 @pytest.fixture
 def dummy_tracking():
     return create_delivered_tracking()
-

@@ -142,7 +142,14 @@ def process_refund_automation():
     total_refunded_count = successful_refunds
     if not total_refunded_count:
         logger.warning(
-            "No eligible tracking data found", extra={"trackings": len(trackings)}
+            "No refund processed",
+            extra={
+                "trackings": len(trackings),
+                "orders": len(order_and_tracking),
+                "successful_refunds": successful_refunds,
+                "failed_refunds": failed_refunds,
+                "skipped_refunds": skipped_refunds,
+            },
         )
         slack_notifier.send_warning(
             "No refund processed",
@@ -269,6 +276,11 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
         shipping = {}
         if refund_calculation.refund_type == "FULL":
             shipping = {"fullRefund": True}
+        elif (
+            refund_calculation.refund_type == "PARTIAL"
+            and refund_calculation.shipping_refund
+        ):
+            shipping = {"amount": refund_calculation.shipping_refund}
 
         # Prepare GraphQL variables with calculated data
         variables = {

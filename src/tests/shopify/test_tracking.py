@@ -23,7 +23,6 @@ from src.tests.uat.uat_constants import UATConstants
 TEST_TRACKING_NUMBER = "123456"
 
 
-
 def test_get_order_by_tracking_id(dummy_order, dummy_orders_with_invalid_returns):
     orders = [MagicMock(), Mock(), dummy_order, *dummy_orders_with_invalid_returns]
     result = get_order_by_tracking_id(UATConstants.TRACKING_NUMBER, orders)
@@ -103,4 +102,3 @@ def test_fetch_tracking_details_success(
     assert dummy_order == result[0][0]
     assert isinstance(result[0][0], ShopifyOrder)
     assert isinstance(result[0][1], TrackingData)
-

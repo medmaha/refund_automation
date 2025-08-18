@@ -15,6 +15,7 @@ TRACKING_SEGMENT_SIZE = 40  # Maximum trackings per API call
 
 logger = get_logger(__name__)
 
+
 def get_order_by_tracking_id(tracking_number: str, orders: list[ShopifyOrder]):
     """
     Optimized function to find an order by tracking number.

@@ -26,6 +26,7 @@ def test_cleanup_orders_failure(dummy_order, dummy_orders_with_invalid_returns):
     assert dummy_order not in cleaned
     assert len(cleaned) == 0
 
+
 @patch("src.shopify.orders.__fetch_all_shopify_orders")
 @patch("src.shopify.orders.fetch_tracking_details")
 @patch("src.shopify.orders.register_orders_trackings")

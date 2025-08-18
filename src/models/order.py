@@ -161,29 +161,33 @@ class ShopifyOrder(BaseModel):
 
     @property
     def tracking_number(self):
+        return self.get_tracking_number()
 
-        for rf in self.valid_return_shipment.reverseFulfillmentOrders:
-            for rd in rf.reverseDeliveries:
-                if rd.deliverable.tracking.number:
-                    return rd.deliverable.tracking.number
-
-    @property
-    def is_eligible(self):
-        for return_fulfillment in self.returns:
-            if (
-                return_fulfillment.returnLineItems
-                and return_fulfillment.reverseFulfillmentOrders
-            ):
-                return True
+    def get_tracking_number(self):
+        if self.valid_return_shipment:
+            for rf in self.valid_return_shipment.reverseFulfillmentOrders:
+                for rd in rf.reverseDeliveries:
+                    if rd.deliverable.tracking.number:
+                        return rd.deliverable.tracking.number
         return None
 
     @property
+    def priorRefundAmount(self):
+        total = 0.0
+        for refund in self.refunds:
+            amount = refund.totalRefundedSet.presentmentMoney.amount
+            if refund.createdAt and amount is not None:
+                total += amount
+        return total
+
+    @property
     def valid_return_shipment(self):
-
-        if not self.is_eligible:
-            return None
-
         for return_fulfillment in self.returns:
+            if not (
+                return_fulfillment.returnLineItems
+                and return_fulfillment.reverseFulfillmentOrders
+            ):
+                continue
             for rfo in return_fulfillment.reverseFulfillmentOrders:
                 for rd in rfo.reverseDeliveries:
                     if (

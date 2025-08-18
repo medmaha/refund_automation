@@ -2,50 +2,52 @@ import sys
 
 from fastapi import FastAPI
 
-from src.config import DRY_RUN
+from src.config import DRY_RUN, AUTOMATION_ID
 from src.logger import get_logger
-from src.shopify.refund import process_refund_automation
-from src.utils.audit import audit_logger
-from src.utils.idempotency import idempotency_manager
-from src.utils.slack import slack_notifier
-from src.utils.timezone import timezone_handler
-
-logger = get_logger(__name__)
 
 
 app = FastAPI()
 
+EXECUTION_MODE = "DRY-RUN" if DRY_RUN else "LIVE"
+
+logger = get_logger(__name__)
+logger.info(
+    f"================================= [Refund Automation | MODE=[{EXECUTION_MODE} | ID=[{AUTOMATION_ID}]]] ================================="
+)
+
 
 def main(mode: str):
-
-    logger.info(
-        f"================================= [Refund Automation - {mode}] ================================="
-    )
-
-    # Log system information
-    logger.info(
-        "System initialization",
-        extra={
-            "mode": mode,
-            "audit_stats": audit_logger.get_audit_stats(),
-            "timezone_info": timezone_handler.get_timezone_info(),
-            "idempotency_stats": idempotency_manager.get_stats(),
-        },
-    )
+    from src.shopify.refund import process_refund_automation
+    from src.utils.audit import audit_logger
+    from src.utils.idempotency import idempotency_manager
+    from src.utils.slack import slack_notifier
+    from src.utils.timezone import timezone_handler
 
     try:
+        # Log system information
+        logger.info(
+            "System initialization",
+            extra={
+                "mode": mode,
+                "audit_stats": audit_logger.get_audit_stats(),
+                "timezone_info": timezone_handler.get_timezone_info(),
+                "idempotency_stats": idempotency_manager.get_stats(),
+            },
+        )
+
         # Execute the refund automation function
         process_refund_automation()
 
+        # # Initialize alert utility classes
         # audit_logger.mark_operation_completed()
         # slack_notifier.mark_operation_completed()
         # timezone_handler.mark_operation_completed()
         # idempotency_manager.mark_operation_completed()
 
         logger.info(
-            f"Refund automation completed successfully in {mode} mode",
-            extra={"mode": mode, "exit_code": 0},
+            f"================================= [Refund Automation | MODE=[{EXECUTION_MODE} | ID=[{AUTOMATION_ID}]]] ================================="
         )
+        sys.exit(0)
 
     except KeyboardInterrupt:
         logger.warning("Refund automation interrupted by user")
@@ -66,11 +68,6 @@ def main(mode: str):
 
         sys.exit(1)
 
-    logger.info(
-        f"=============================== [Completed Refund Automation - {mode}] ==============================="
-    )
-
 
 if __name__ == "__main__":
-    mode = "DRY-RUN" if DRY_RUN else "LIVE"
-    main(mode=mode)
+    main(mode=EXECUTION_MODE)

@@ -39,7 +39,12 @@ class AuditLogger:
     def _get_log_filename(self) -> str:
         """Generate audit log filename based on current date."""
         today = datetime.now().strftime("%Y-%m-%d")
-        return os.path.join(self.log_dir, f"audit_{today}.json")
+        active_filename = f"audit_{today}.json"
+
+        if DRY_RUN:
+            active_filename = "dry_run." + active_filename
+
+        return os.path.join(self.log_dir, active_filename)
 
     def _write_audit_entry(self, entry: Dict[str, Any]):
         """Write audit entry to log file."""
@@ -47,9 +52,6 @@ class AuditLogger:
             return
 
         log_file = self._get_log_filename()
-
-        if DRY_RUN:
-            log_file = "dry_run." + log_file
 
         try:
             with open(log_file, "a", encoding="utf-8") as f:
@@ -97,19 +99,15 @@ class AuditLogger:
             "idempotency_key": idempotency_key,
         }
 
-        # Add amounts if provided
         if amounts:
             entry["amounts"] = amounts
 
-        # Add references if provided
         if references:
             entry["references"] = references
 
-        # Add API status if provided
         if api_status:
             entry["api_status"] = api_status
 
-        # Add additional data if provided
         if additional_data:
             entry.update(additional_data)
 

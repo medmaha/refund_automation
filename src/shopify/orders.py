@@ -9,6 +9,7 @@ from src.config import (
     SHOPIFY_STORE_URL,
     TRACKING_API_KEY,
     TRACKING_BASE_URL,
+    DEFAULT_CARRIER_CODE
 )
 from src.logger import get_logger
 from src.models.order import ShopifyOrder
@@ -21,7 +22,7 @@ logger = get_logger(__name__)
 
 REQUEST_PAGINATION_SIZE = 12
 MAX_SHOPIFY_ORDER_DATA = 10_000
-DEFAULT_CARRIER_CODE = 7041  # DHL Paket
+
 TRACKING_SEGMENT_SIZE = 40  # Maximum trackings per API call
 
 ELIGIBLE_ORDERS_QUERY = """
@@ -72,7 +73,6 @@ def __generate_tracking_payload(orders: list[ShopifyOrder]):
             for index, rfo in enumerate(
                 order.valid_return_shipment.reverseFulfillmentOrders
             ):
-
                 if not len(rfo.reverseDeliveries) > 0:
                     continue
 
@@ -310,8 +310,8 @@ def __fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
 
             # Extract tracking status and sub-status with validation
             try:
-                tracking_status = _tracking.track_info.latest_status.status
-                tracking_sub_status = _tracking.track_info.latest_status.sub_status
+                tracking_status = _tracking.track_info.latest_status.status.value
+                tracking_sub_status = _tracking.track_info.latest_status.sub_status.value
             except AttributeError as e:
                 logger.warning(
                     f"Invalid tracking status structure for {_tracking.number}: {e}",
@@ -322,8 +322,8 @@ def __fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
             # Only add to result if
             # status and sub-status match the return criteria
             if (
-                tracking_status == TrackingStatus.DELIVERED
-                and tracking_sub_status == TrackingSubStatus.DELIVERED_OTHER
+                tracking_status == TrackingStatus.DELIVERED.value
+                and tracking_sub_status == TrackingSubStatus.DELIVERED_OTHER.value
             ):
                 order_and_trackings.append((corresponding_order, _tracking))
                 matched_tracking_numbers.append(
@@ -451,7 +451,6 @@ def __cleanup_shopify_orders(orders: list[ShopifyOrder]):
     order = orders.pop()
 
     while True:
-
         # Only keep orders that have a valid return shipment
         if order.valid_return_shipment:
             cleaned_orders.append(order)
@@ -692,7 +691,6 @@ def parse_graphql_order_data(node: dict):
 
     # Flatten nested return data for easier processing
     for refund in order_refunds:
-
         return_line_items = refund.get("refundLineItems", {})
 
         if isinstance(return_line_items, dict) and "nodes" in return_line_items:
@@ -703,7 +701,6 @@ def parse_graphql_order_data(node: dict):
             refund["refundLineItems"] = []
 
     for refund in returns_nodes:
-
         return_line_items = refund.get("returnLineItems", {})
 
         if isinstance(return_line_items, dict) and "nodes" in return_line_items:

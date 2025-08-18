@@ -21,10 +21,10 @@ ignore = ["E402"]
 [tool.coverage.run]
 source = ["src"]
 omit = [
-    "src/tests/*",
-    "*/test_*",
-    "*/__init__.py",
-    "src/config.py",  # Configuration file
+  "src/tests/*",
+  "*/test_*",
+  "*/__init__.py",
+  "src/config.py", # Configuration file
 ]
 
 [tool.coverage.report]
@@ -32,16 +32,16 @@ show_missing = false
 skip_covered = false
 fail_under = 80
 exclude_lines = [
-    "pragma: no cover",
-    "def __repr__",
-    "if self.debug:",
-    "if settings.DEBUG",
-    "raise AssertionError",
-    "raise NotImplementedError",
-    "if 0:",
-    "if __name__ == .__main__.:",
-    "class .*\\bProtocol\\):",
-    "@(abc\\.)?abstractmethod",
+  "pragma: no cover",
+  "def __repr__",
+  "if self.debug:",
+  "if settings.DEBUG",
+  "raise AssertionError",
+  "raise NotImplementedError",
+  "if 0:",
+  "if __name__ == .__main__.:",
+  "class .*\\bProtocol\\):",
+  "@(abc\\.)?abstractmethod",
 ]
 
 [tool.coverage.html]
@@ -49,8 +49,8 @@ directory = ".htmlcov"
 
 [tool.pytest.ini_options]
 addopts = [
-    "--cov=src",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "--cov-fail-under=40"
+  "--cov=src",
+  "--cov-report=term-missing",
+  "--cov-report=html",
+  "--cov-fail-under=40",
 ]

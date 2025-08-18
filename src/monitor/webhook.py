@@ -7,7 +7,6 @@ logger = get_logger(__name__)
 
 
 def handle_17track_webhook(payload: WebhookEvent):
-    
     # TODO: To be used later with webhooks
 
     event = payload.event

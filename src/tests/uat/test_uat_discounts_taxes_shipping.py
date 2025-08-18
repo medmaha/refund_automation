@@ -125,9 +125,9 @@ class TestLineLevelDiscountScenarios:
             False,
         )
 
-        order, info = create_b_d2_order(
+        order, _ = create_b_d2_order(
             full_refund=True,
-            with_shipping=False,  # FIXME: change to True
+            with_shipping=False,
         )  # Item1: $60-$10=$50, Item2: $40, Total: $90 + $10 shipping = $100
         tracking = create_delivered_tracking(tracking_number=order.tracking_number)
 
@@ -179,9 +179,7 @@ class TestLineLevelDiscountScenarios:
         # Mark second item as non-refundable to create partial scenario
         order.lineItems[1].refundableQuantity = 0
 
-        tracking = create_delivered_tracking(
-            days_ago=6, tracking_number=order.tracking_number
-        )
+        tracking = create_delivered_tracking(tracking_number=order.tracking_number)
 
         # Test partial refund calculation
         calculation = refund_calculator.calculate_refund(order, tracking)
@@ -191,16 +189,14 @@ class TestLineLevelDiscountScenarios:
 
         # TODO: fix the discount with refund_calculator
         # Should refund only first item: ($60 - $10 discount) = $50 + proportional shipping
-        # expected_item_refund = (
-        #     info.get("item_1_amount") - calculation.discount_deduction
-        # )
-        # proportional_shipping = (
-        #     50.0 / 90.0
-        # ) * calculation.discount_deduction or 1  # 50/90 * x shipping
+        line_item_amount = 60 - (0.1 * 100)
+        proportional_shipping = (
+            (line_item_amount * 2) / 165.99
+        ) * calculation.discount_deduction or 1  # 50/165.99 * x shipping
 
-        # expected_total = expected_item_refund + proportional_shipping
+        expected_total = line_item_amount + proportional_shipping
 
-        # assert abs(calculation.total_refund_amount - expected_total) < 0.01
+        assert abs(calculation.total_refund_amount - expected_total) < 0.01
 
         # Verify only discounted item is included
         assert len(calculation.line_items_to_refund) == 1

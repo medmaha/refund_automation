@@ -47,8 +47,8 @@ class FixtureBuilder:
         # Build money sets
         currency = self._order_data["currency"]
         total_money_set = MoneyBagSet(
-            presentmentMoney=MoneyBag(amount=total_amount, currencyCode=currency),
             shopMoney=MoneyBag(amount=total_amount, currencyCode=currency),
+            presentmentMoney=MoneyBag(amount=total_amount, currencyCode=currency),
         )
 
         # Build line items
@@ -82,8 +82,8 @@ class FixtureBuilder:
             if tax_amount > 0:
                 item_tax = (item_total / line_items_total) * tax_amount
                 tax_money = MoneyBagSet(
-                    presentmentMoney=MoneyBag(amount=item_tax, currencyCode=currency),
                     shopMoney=MoneyBag(amount=item_tax, currencyCode=currency),
+                    presentmentMoney=MoneyBag(amount=item_tax, currencyCode=currency),
                 )
                 tax_lines.append(
                     TaxLine(
@@ -98,8 +98,8 @@ class FixtureBuilder:
                 )
 
             original_total_set = MoneyBagSet(
-                presentmentMoney=MoneyBag(amount=item_total, currencyCode=currency),
                 shopMoney=MoneyBag(amount=item_total, currencyCode=currency),
+                presentmentMoney=MoneyBag(amount=item_total, currencyCode=currency),
             )
 
             line_items.append(
@@ -117,10 +117,10 @@ class FixtureBuilder:
         transactions = []
         for trans_data in self._order_data["transactions"]:
             amount_set = MoneyBagSet(
+                shopMoney=MoneyBag(amount=trans_data["amount"], currencyCode=currency),
                 presentmentMoney=MoneyBag(
                     amount=trans_data["amount"], currencyCode=currency
                 ),
-                shopMoney=MoneyBag(amount=trans_data["amount"], currencyCode=currency),
             )
             transactions.append(
                 OrderTransaction(
@@ -145,7 +145,7 @@ class FixtureBuilder:
                 )
 
         shipping_refund_set = MoneyBagSet(
-            presentmentMoney=MoneyBag(
+            shopMoney=MoneyBag(
                 amount=(
                     shipping_amount
                     if self._order_data.get("shipping_refundable", True)
@@ -153,7 +153,7 @@ class FixtureBuilder:
                 ),
                 currencyCode=currency,
             ),
-            shopMoney=MoneyBag(
+            presentmentMoney=MoneyBag(
                 amount=(
                     shipping_amount
                     if self._order_data.get("shipping_refundable", True)
@@ -166,7 +166,6 @@ class FixtureBuilder:
         suggested_refund = SuggestedRefund(
             amountSet=total_money_set,
             shipping=SuggestedRefundRefundShipping(amountSet=shipping_refund_set),
-            refundDuties=[],
             suggestedTransactions=suggested_transactions,
         )
 
@@ -216,10 +215,10 @@ class FixtureBuilder:
         refunds = []
         for refund_data in self._order_data["refunds"]:
             refund_money_set = MoneyBagSet(
+                shopMoney=MoneyBag(amount=refund_data["amount"], currencyCode=currency),
                 presentmentMoney=MoneyBag(
                     amount=refund_data["amount"], currencyCode=currency
                 ),
-                shopMoney=MoneyBag(amount=refund_data["amount"], currencyCode=currency),
             )
             refunds.append(
                 OrderRefunds(

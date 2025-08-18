@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TrackingStatus(Enum):
@@ -20,8 +20,12 @@ class TrackingSubStatus(Enum):
     IN_TRANSIT_OTHER = "InTransit"
     NOTFOUND_OTHER = "NotFound_Other"
     DELIVERED_OTHER = "Delivered_Other"
-    Exception_Returned = "Exception_Returned"
-    Exception_Returning = "Exception_Returning"
+    EXCEPTION_RETURNED = (
+        "Exception_Returned"  # Sender has successfully received the returned package.
+    )
+    EXCEPTION_RETURNING = (
+        "Exception_Returning"  # Package is being returned to the sender.
+    )
 
 
 class LatestStatus(BaseModel):
@@ -52,9 +56,10 @@ class TrackInfo(BaseModel):
 
 
 class TrackingData(BaseModel):
-    tag: str
-    number: str
-    carrier: int
+    tag: Optional[str]
+    carrier: Optional[int]
+    number: Optional[str]
+    carrier_disagreement: Optional[dict] = Field(default_factory=dict)
     track_info: Optional[TrackInfo]
 
     def __str__(self):

@@ -151,7 +151,7 @@ class IdempotencyManager:
             "order_id": order_id,
             "operation": operation,
             "dry_run": DRY_RUN,
-            "result": result
+            "result": result,
         }
 
         self._cache[idempotency_key] = entry

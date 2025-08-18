@@ -72,7 +72,6 @@ def __generate_tracking_payload(orders: list[ShopifyOrder]):
             for index, rfo in enumerate(
                 order.valid_return_shipment.reverseFulfillmentOrders
             ):
-
                 if not len(rfo.reverseDeliveries) > 0:
                     continue
 
@@ -451,7 +450,6 @@ def __cleanup_shopify_orders(orders: list[ShopifyOrder]):
     order = orders.pop()
 
     while True:
-
         # Only keep orders that have a valid return shipment
         if order.valid_return_shipment:
             cleaned_orders.append(order)
@@ -692,7 +690,6 @@ def parse_graphql_order_data(node: dict):
 
     # Flatten nested return data for easier processing
     for refund in order_refunds:
-
         return_line_items = refund.get("refundLineItems", {})
 
         if isinstance(return_line_items, dict) and "nodes" in return_line_items:
@@ -703,7 +700,6 @@ def parse_graphql_order_data(node: dict):
             refund["refundLineItems"] = []
 
     for refund in returns_nodes:
-
         return_line_items = refund.get("returnLineItems", {})
 
         if isinstance(return_line_items, dict) and "nodes" in return_line_items:

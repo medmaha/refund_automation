@@ -22,7 +22,7 @@ SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "#refund-automation")
 SLACK_ENABLED = os.getenv("SLACK_ENABLED", "true").lower() == "true"
 
 # Execution Mode
-DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
+DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
 
 # Request Settings
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "15"))
@@ -39,7 +39,7 @@ __automation_id = None
 
 
 def __get_automation_id():
-
+    """Unique ID generated for this script execution."""
     global __automation_id
 
     if __automation_id:
@@ -48,6 +48,7 @@ def __get_automation_id():
     import uuid
 
     __automation_id = str(uuid.uuid4()).replace("-", "")[:16].upper()
+
     return __automation_id
 
 

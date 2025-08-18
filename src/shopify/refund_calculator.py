@@ -121,7 +121,10 @@ class RefundCalculator:
         ]
 
         # Use suggested refund from Shopify which handles original payment method allocation
-        total_refund_amount = order.suggestedRefund.amountSet.presentmentMoney.amount - order.priorRefundAmount
+        total_refund_amount = (
+            order.suggestedRefund.amountSet.presentmentMoney.amount
+            - order.priorRefundAmount
+        )
         transactions = self._prepare_refund_transactions(order)
 
         # Calculate shipping and tax refunds
@@ -129,7 +132,9 @@ class RefundCalculator:
             order.suggestedRefund.shipping.amountSet.presentmentMoney.amount
         )
 
-        tax_refund = self._calculate_full_total_tax_refund(order.lineItems, order.lineItems)
+        tax_refund = self._calculate_full_total_tax_refund(
+            order.lineItems, order.lineItems
+        )
 
         return RefundCalculationResult(
             refund_type="FULL",
@@ -155,7 +160,8 @@ class RefundCalculator:
             line_item_id = returned_item.fulfillmentLineItem.lineItem.get("id")
             if line_item_id:
                 returned_qty_map[line_item_id] = (
-                    returned_qty_map.get(line_item_id, 0) + returned_item.refundableQuantity
+                    returned_qty_map.get(line_item_id, 0)
+                    + returned_item.refundableQuantity
                 )
 
         # Calculate proportional refund amounts for each line item
@@ -193,9 +199,10 @@ class RefundCalculator:
         )
 
         # Total refund amount
-        total_refund_amount = float((
-            float(total_line_item_refund) + float(shipping_refund) + float(tax_refund)
-        ) - order.priorRefundAmount)
+        total_refund_amount = float(
+            (float(total_line_item_refund) + float(shipping_refund) + float(tax_refund))
+            - order.priorRefundAmount
+        )
 
         # Calculate proportional transactions
         transactions = self._calculate_proportional_transactions(
@@ -247,13 +254,15 @@ class RefundCalculator:
         return line_item_refund
 
     def _calculate_proportional_shipping_refund(
-        self, order: ShopifyOrder, returned_line_item_entries: List[tuple[LineItem, dict]]
+        self,
+        order: ShopifyOrder,
+        returned_line_item_entries: List[tuple[LineItem, dict]],
     ):
         """Calculate proportional shipping refund based on returned items."""
 
         if not returned_line_item_entries:
             return Decimal("0")
-        
+
         # Check if shipping value is provided
         is_refundable_shipping = Decimal(
             str(order.suggestedRefund.shipping.amountSet.presentmentMoney.amount)
@@ -261,13 +270,13 @@ class RefundCalculator:
 
         if is_refundable_shipping == 0:
             return Decimal("0")
-        
+
         # Calculate proportion of returned items by value
         total_order_value = Decimal(str(order.totalPriceSet.presentmentMoney.amount))
 
         if total_order_value == 0:
             return Decimal("0")
-        
+
         returned_items_value = Decimal("0")
         for line_item_entry in returned_line_item_entries:
             order_line_item, _ = line_item_entry
@@ -275,7 +284,6 @@ class RefundCalculator:
                 str(order_line_item.originalTotalSet.presentmentMoney.amount)
             )
             returned_items_value += line_item_value
-
 
         shipping_proportion = returned_items_value / total_order_value
         original_shipping = Decimal(
@@ -285,13 +293,14 @@ class RefundCalculator:
         return original_shipping * shipping_proportion
 
     def _calculate_proportional_tax_refund(
-        self, all_line_items: List[LineItem], returned_line_item_entries: List[tuple[LineItem, dict]]
+        self,
+        all_line_items: List[LineItem],
+        returned_line_item_entries: List[tuple[LineItem, dict]],
     ):
         """Calculate total tax refund for returned line items."""
 
         total_tax_refund = Decimal("0")
         for line_item_entry in returned_line_item_entries:
-
             order_line_item, return_line_item = line_item_entry
 
             # Find the corresponding original line item to get the original quantity
@@ -311,9 +320,9 @@ class RefundCalculator:
                     ) / Decimal(str(order_line_item.refundableQuantity))
 
                     total_tax_refund += tax_per_unit * Decimal(str(returned_quantity))
-                    
+
         return total_tax_refund
-    
+
     def _calculate_full_total_tax_refund(
         self, all_line_items: List[LineItem], returned_line_item_entries: List[LineItem]
     ):
@@ -333,7 +342,7 @@ class RefundCalculator:
                         str(tax_line.priceSet.presentmentMoney.amount)
                     )
                     total_tax_refund += tax_per_unit * Decimal(str(returned_quantity))
-                    
+
         return total_tax_refund
 
     def _calculate_proportional_transactions(
@@ -365,7 +374,7 @@ class RefundCalculator:
                 "parentId": suggested_transaction.parentTransaction.id,
                 "kind": "REFUND",
                 "gateway": suggested_transaction.gateway,
-                "amount": self.__normalize_amount(proportional_amount)
+                "amount": self.__normalize_amount(proportional_amount),
             }
             transactions.append(transaction_data)
 
@@ -385,13 +394,17 @@ class RefundCalculator:
                 "parentId": transaction.parentTransaction.id,
                 "kind": "REFUND",
                 "gateway": transaction.gateway,
-                "amount": self.__normalize_amount(transaction.amountSet.presentmentMoney.amount),
+                "amount": self.__normalize_amount(
+                    transaction.amountSet.presentmentMoney.amount
+                ),
             }
             transactions.append(data)
 
         return transactions
 
-    def __normalize_amount(self, value: Union[str, int, float, Decimal], decimal_places: int = 2) -> float:
+    def __normalize_amount(
+        self, value: Union[str, int, float, Decimal], decimal_places: int = 2
+    ) -> float:
         try:
             value_decimal = Decimal(str(value))
         except:
@@ -400,5 +413,6 @@ class RefundCalculator:
         quantize_str = f"1.{'0' * decimal_places}"
         normalized = value_decimal.quantize(Decimal(quantize_str), rounding=ROUND_DOWN)
         return float(normalized)
+
 
 refund_calculator = RefundCalculator()

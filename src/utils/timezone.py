@@ -47,6 +47,7 @@ class TimezoneHandler:
         return self.get_current_time_store() + timedelta(
             days=days, hours=hours, minutes=minutes, seconds=seconds
         )
+
     def get_subtracted_store_time(
         self, seconds: int = 0, minutes: int = 0, hours: int = 0, days: int = 0
     ) -> datetime:
@@ -58,7 +59,6 @@ class TimezoneHandler:
     def get_current_time_store(self) -> datetime:
         """Get current time in store timezone."""
         return datetime.now(self.store_timezone)
-
 
     def to_store_timezone(self, dt: datetime) -> datetime:
         """Convert datetime to store timezone."""

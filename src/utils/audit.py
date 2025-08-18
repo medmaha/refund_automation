@@ -10,6 +10,7 @@ from src.utils.timezone import get_current_time_iso8601
 
 logger = get_logger(__name__)
 
+
 class AuditEventType(Enum):
     """Types of audit events."""
 
@@ -43,8 +44,7 @@ class AuditLogger:
         if DRY_RUN:
             active_filename = "dry_run." + active_filename
 
-        return  os.path.join(self.log_dir, active_filename)
-
+        return os.path.join(self.log_dir, active_filename)
 
     def _write_audit_entry(self, entry: Dict[str, Any]):
         """Write audit entry to log file."""

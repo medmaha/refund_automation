@@ -8,7 +8,9 @@ from src.models.order import (
 from src.utils.timezone import get_current_time_iso8601
 
 
-def create_dry_run_refund(order: ShopifyOrder, refund_calculation:RefundCalculationResult) -> RefundCreateResponse:
+def create_dry_run_refund(
+    order: ShopifyOrder, refund_calculation: RefundCalculationResult
+) -> RefundCreateResponse:
     """Create a mock refund for dry run mode using refund calculation."""
     from src.models.order import MoneyBag, MoneyBagSet
 
@@ -18,8 +20,7 @@ def create_dry_run_refund(order: ShopifyOrder, refund_calculation:RefundCalculat
     # Create refund money set based on calculated amount
     refund_money_bag = MoneyBag(amount=amount, currencyCode=currencyCode)
     refund_money_set = MoneyBagSet(
-        presentmentMoney=refund_money_bag,
-        shopMoney=refund_money_bag
+        presentmentMoney=refund_money_bag, shopMoney=refund_money_bag
     )
 
     refund_type_suffix = f"-{refund_calculation.refund_type}"
@@ -29,5 +30,5 @@ def create_dry_run_refund(order: ShopifyOrder, refund_calculation:RefundCalculat
         orderId=order.id,
         orderName=f"{order.name}-R1 | DRY_RUN | {refund_calculation.refund_type}",
         totalRefundedSet=refund_money_set,
-        createdAt=get_current_time_iso8601()
+        createdAt=get_current_time_iso8601(),
     )

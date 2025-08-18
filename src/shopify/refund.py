@@ -11,6 +11,7 @@ from src.logger import get_logger
 from src.models.order import (
     RefundCreateResponse,
     ShopifyOrder,
+    ReturnFulfillments
 )
 from src.models.tracking import (
     TrackingData,
@@ -19,12 +20,14 @@ from src.models.tracking import (
 )
 from src.shopify.graph_ql_queries import REFUND_CREATE_MUTATION
 from src.shopify.orders import retrieve_refundable_shopify_orders
-from src.shopify.refund_calculator import RefundCalculationResult, refund_calculator
+from src.shopify.refund_calculator import refund_calculator
 from src.utils.audit import audit_logger, log_refund_audit
 from src.utils.idempotency import idempotency_manager
 from src.utils.retry import exponential_backoff_retry
 from src.utils.slack import slack_notifier
 from src.utils.timezone import get_current_time_iso8601, timezone_handler
+from src.utils.dry_run import create_dry_run_refund
+from src.utils.timing_validator import validate_refund_timing
 
 logger = get_logger(__name__)
 
@@ -78,6 +81,9 @@ def process_refund_automation():
 
     logger.info(f"Processing {len(trackings)} orders for potential refunds")
 
+
+    refunded_returns: list[ReturnFulfillments] = []
+
     for idx, order_and_tracking in enumerate(trackings):
         # Extract order and tracking first
         order, tracking = order_and_tracking
@@ -90,17 +96,9 @@ def process_refund_automation():
                 "order_name": order.name
             }
         )
-
-        _cleaned_results = __full_clean_order(order, tracking, currency)
-        if not _cleaned_results:
-            skipped_refunds += 1
-            continue
-
-        order, refund_calculation, idempotency_key  = _cleaned_results
-
         # Process refund with comprehensive error handling
         try:
-            refund = refund_order(order, tracking, idempotency_key=idempotency_key)
+            refund = refund_order(order, tracking)
             if refund:
                 logger.info(
                     "Refund processed successfully",
@@ -111,11 +109,12 @@ def process_refund_automation():
                 
                 # Add to total amount
                 if hasattr(refund.totalRefundedSet, 'presentmentMoney'):
-                    total_refunded_amount += refund_calculation.total_refund_amount
+                    total_refunded_amount += refund.totalRefundedSet.presentmentMoney.amount
                     currency = refund.totalRefundedSet.presentmentMoney.currencyCode or currency
-                    
-                idempotency_manager.mark_operation_completed(idempotency_key, order.id, "refund", {"result_id": refund.id, **refund_calculation.model_dump()})
 
+                # Capture the returns to close them later
+                refunded_returns.extend(order.returns)
+                    
             else:
                 logger.warning(
                     "Refund not processed",
@@ -171,10 +170,8 @@ def process_refund_automation():
             extra={"refunded_orders": list(refunded_orders.keys())}
         )
 
-    sys.exit(0)
 
-
-def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None) -> Optional[RefundCreateResponse]:
+def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateResponse]:
     """
     Process refund for a single order with comprehensive error handling, 
     idempotency, audit logging, and retry mechanisms.
@@ -186,15 +183,15 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
     Returns:
         RefundCreateResponse if successful, None otherwise
     """
-    
+
+    # Generate request ID for tracking
+    request_id = str(uuid.uuid4())[:8]
+
     # Extract basic order information
     order_amount = order.totalPriceSet.presentmentMoney.amount
     currency = order.totalPriceSet.presentmentMoney.currencyCode or "USD"
     tracking_number = tracking.number if tracking else None
-    
-    # Generate request ID for tracking
-    request_id = str(uuid.uuid4())[:8]
-    
+
     logger.info(
         f"Initiating refund for order {order.name} (${order_amount} {currency}) - mode: {EXECUTION_MODE}",
         extra={
@@ -208,9 +205,14 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
             "timestamp": get_current_time_iso8601()
         }
     )
-    
+        
     try:
-        refund_calculation = refund_calculator.calculate_refund(order, tracking)
+        _cleaned_results = __full_clean_order(order, tracking)
+        
+        if not _cleaned_results:
+            return None
+
+        order, refund_calculation, idempotency_key  = _cleaned_results
         
         if not refund_calculation.transactions:
             error_msg = f"No valid transactions calculated for refund in order {order.name}"
@@ -233,6 +235,12 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
                 idempotency_key=idempotency_key,
                 error="No valid transactions for refund"
             )
+            slack_notifier.send_error("No valid transactions calculated for refund in order {order.name}", details={
+                "order_id": order.id,
+                "order_name": order.name,
+                "decision_branch": "no_valid_transactions",
+                "tracking_number": tracking_number
+            })
             return None
         
         # Use calculated refund data
@@ -240,14 +248,13 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
         if refund_calculation.refund_type == "PARTIAL":
             refund_note += f" (${refund_calculation.total_refund_amount:.2f} of ${order_amount:.2f})"
         
-        # Prepare GraphQL variables with calculated data
-
         shipping = {}
         if refund_calculation.refund_type == "FULL":
             shipping = {
                 "fullRefund": True
             }
 
+        # Prepare GraphQL variables with calculated data
         variables = {
             "input": {
                 "notify": True,
@@ -277,14 +284,14 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
             refund = _execute_shopify_refund(order, variables, request_id)
         else:
             # Create a mock refund for dry run
-            refund = _create_dry_run_refund(order, refund_calculation)
+            refund = create_dry_run_refund(order, refund_calculation)
 
         if refund:
             # Log successful audit event
             log_refund_audit(
                 order_id=order.id,
                 order_name=order.name,
-                refund_amount=order_amount,
+                refund_amount=refund_calculation.total_refund_amount,
                 currency=currency,
                 decision="processed",
                 tracking_number=tracking_number,
@@ -294,7 +301,7 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
             
             # Send success notification
             slack_notifier.send_success(
-                f"Refund processed for order {order.name}",
+                f"Refund successfully processed for order {order.name}",
                 details={
                     "order_id": order.id,
                     "refund_id": refund.id,
@@ -309,12 +316,14 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
                     "order_id": order.id,
                     "order_name": order.name,
                     "refund_id": refund.id,
-                    "refund_amount": order_amount,
+                    "refund_amount": refund_calculation.total_refund_amount,
                     "currency": currency,
                     "request_id": request_id,
                     "decision_branch": "processed"
                 }
             )
+
+            idempotency_manager.mark_operation_completed(idempotency_key, order.id, "refund", {"result_id": refund.id, "results":refund_calculation.model_dump()})
         
         else:
             raise ValueError("Refund Creation Failed")
@@ -360,6 +369,7 @@ def refund_order(order: ShopifyOrder, tracking=None, idempotency_key: str = None
         )
         
         return None
+
 
 @exponential_backoff_retry(
     exceptions=(requests.exceptions.RequestException, requests.exceptions.Timeout, Exception)
@@ -497,39 +507,90 @@ def _execute_shopify_refund(order: ShopifyOrder, variables: dict, request_id: st
         raise  # Re-raise for retry mechanism
 
 
-def _create_dry_run_refund(order: ShopifyOrder, refund_calculation:RefundCalculationResult) -> RefundCreateResponse:
-    """Create a mock refund for dry run mode using refund calculation."""
-    from src.models.order import MoneyBag, MoneyBagSet
+def __full_clean_order(order: ShopifyOrder, tracking: TrackingData):
 
-    amount = refund_calculation.total_refund_amount
-    currencyCode = order.totalPriceSet.presentmentMoney.currencyCode
+    tracking_number = order.get_tracking_number()
+    currency = order.totalPriceSet.presentmentMoney.currencyCode or "USD"
 
-    # Create refund money set based on calculated amount
-    refund_money_bag = MoneyBag(amount=amount, currencyCode=currencyCode)
-    refund_money_set = MoneyBagSet(
-        presentmentMoney=refund_money_bag,
-        shopMoney=refund_money_bag
+    order_tags_string = "".join(order.tags).lower()
+
+    # 
+    invalid_tags = ["chargeback", "manual-refund-only", "refund-auto-off", "no-auto-refund", "refund:auto:off", "refund:force:now"]
+    
+    # A bypassing flag, when True no validation check is made
+    force_refund =  any(
+        (keyword in order_tags_string) for keyword in ["refund:force:now"]
     )
 
-    refund_type_suffix = f"-{refund_calculation.refund_type}"
+    # A flag to stop the refund automation process for this order
+    is_auto_off =  any(
+        (keyword in order_tags_string) for keyword in ["refund:auto:off"]
+    )   
 
-    return RefundCreateResponse(
-        id=f"gid://shopify/Refund/{order.id}-{int(time.time())}-dry-run{refund_type_suffix}",
-        orderId=order.id,
-        orderName=f"{order.name}-R1 | DRY_RUN | {refund_calculation.refund_type}",
-        totalRefundedSet=refund_money_set,
-        createdAt=get_current_time_iso8601()
-    )
+    for inv_tag in invalid_tags:
+        if inv_tag in order_tags_string:
+            extra_log_details = {}
 
+            log_decision = "skipped"
+            inv_tag = inv_tag.upper()
+            err_message = f"Invalid tag detected \"{inv_tag}\""
+            
+            "Force should override blocking conditions"
+            if force_refund:
+                extra_log_details.update({
+                    "action": "override",
+                    "reason": f"Bypassing validation because of the \"{inv_tag}\""
+                })
+                log_decision = "bypass_blocking" if not is_auto_off else log_decision
+                err_message += " | Warning(Force Override) |" if not is_auto_off else err_message
 
-def __full_clean_order(order: ShopifyOrder, tracking: TrackingData, currency: str):
+            if is_auto_off:
+                err_message += " | Warning(Automation-Off) try a manual refund |"
+            
+            logger.warning(
+                f"{err_message}: Order({order.name})",
+                extra={"order_id": order.id, "order_name": order.name, "tag":inv_tag, **extra_log_details}
+            )
 
-    tracking_number = tracking.number if tracking else None
+            # Log audit event for skipped order
+            log_refund_audit(
+                order_id=order.id,
+                order_name=order.name,
+                refund_amount=0.0,
+                currency=currency,
+                decision=log_decision,
+                tracking_number=tracking_number,
+                error=err_message,
+            )
 
-    if not tracking_number:
+            slack_notifier.send_warning(f"{err_message}: Order({order.name})", details={"order_id": order.id, "order_name": order.name, "tag":inv_tag, **extra_log_details})
+
+            # Break out of this loop when force_refund is True - Avoid early return
+            if force_refund:
+                break
+            
+            # When true exit immediately
+            if is_auto_off:
+                return None
+            
+            # Return because the lookup tag matches the order.tags
+            return None
+        
+    if not force_refund and (not tracking_number or tracking_number != tracking.number):
+        message = f"Missing tracking-no Order({order.name})"
+
+        details = {"order_id": order.id, "order_name": order.name, "order_tracking_number":tracking_number, "provided_tracking_number":tracking.number}
+
+        if tracking_number != tracking.number:
+            logger.info("ORDER", extra={"abc":order.returns[0].reverseFulfillmentOrders[0].reverseDeliveries[0].deliverable.tracking.model_dump_json()})
+            details.update({
+                "investigate": f"Do a review of this order on shopify admin #{order.name.replace("#", "")}"
+            })
+            message = f"Mismatched tracking numbers: OrderTracking({tracking_number})"
+
         logger.warning(
-            f"Missing tracking-no Order({order.name})",
-            extra={"order_id": order.id, "order_name": order.name}
+            message,
+            extra=details
         )
 
         # Log audit event for skipped order
@@ -540,14 +601,14 @@ def __full_clean_order(order: ShopifyOrder, tracking: TrackingData, currency: st
             currency=currency,
             decision="skipped",
             tracking_number=tracking_number,
-            error="No missing tracking number"
+            error=message
         )
 
-        slack_notifier.send_warning(f"Missing tracking number: Order({order.name})", details={"order_id": order.id, "order_name": order.name})
+        slack_notifier.send_warning(message, details=details)
         return None
 
     latest_event = tracking.track_info.latest_event
-    if not latest_event or not hasattr(tracking, "track_info"):
+    if not force_refund and (not latest_event or not tracking.track_info):
         logger.warning(
             "No latest event found for tracking - skipping",
             extra={"order_id": order.id, "order_name": order.name}
@@ -566,10 +627,33 @@ def __full_clean_order(order: ShopifyOrder, tracking: TrackingData, currency: st
         slack_notifier.send_warning(f"No latest tracking event: Order({order.name})", details={"order_id": order.id, "order_name": order.name, "delivery":str(latest_event or "N/A")})
         return None
 
-    tracking_status = tracking.track_info.latest_status.status
-    tracking_sub_status = tracking.track_info.latest_status.sub_status
+    if not force_refund:
+        is_eligible, timing_details = validate_refund_timing(tracking)
 
-    if tracking_status != TrackingStatus.DELIVERED or tracking_sub_status != TrackingSubStatus.DELIVERED_OTHER:
+        if not is_eligible:
+            err_message = timing_details.pop("reason", "Tracking failed timing validation")
+            logger.warning(
+                "No latest event found for tracking - skipping",
+                extra={"order_id": order.id, "order_name": order.name, **timing_details}
+            )
+            # Log audit event for skipped order
+            log_refund_audit(
+                order_id=order.id,
+                order_name=order.name,
+                refund_amount=0.0,
+                currency=currency,
+                decision="skipped",
+                tracking_number=tracking_number,
+                error=err_message
+            )
+            slack_notifier.send_warning(err_message, details={"order_id": order.id, "order_name": order.name, **timing_details})
+            return None
+
+    latest_status = tracking.track_info.latest_status # Can be null
+    tracking_status = latest_status.status.value if latest_status else None
+    tracking_sub_status = latest_status.sub_status.value if latest_status else None
+
+    if not force_refund and (tracking_status != TrackingStatus.DELIVERED.value or tracking_sub_status != TrackingSubStatus.DELIVERED_OTHER.value):
         logger.warning(
             f"Invalid tracking status for: Order({order.name})",
             extra={"order_id": order.id, "order_name": order.name, "tracking_status":tracking_status, "tracking_sub_status":tracking_sub_status}

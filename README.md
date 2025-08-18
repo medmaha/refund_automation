@@ -7,29 +7,35 @@ A robust, production-ready refund automation system for Shopify with comprehensi
 This implementation fulfills all the specified requirements:
 
 ### ✅ DRY-RUN Toggle
+
 - **`DRY_RUN=true`**: Performs all reads and Slack alerts but makes no Shopify mutations
-- **`DRY_RUN=false`**: Makes actual Shopify API calls and processes real refunds  
+- **`DRY_RUN=false`**: Makes actual Shopify API calls and processes real refunds
 - Every test passes in both modes with identical logic and safety checks
 
 ### ✅ Idempotency
+
 - Prevents double marking and double refunds using SHA-256 hashed keys
 - Persistent cache with configurable TTL (24h default)
 - Rerunning with same inputs produces identical outcomes
 - Works consistently in both DRY-RUN and LIVE modes
 
-### ✅ Time & Timezone Management  
+### ✅ Time & Timezone Management
+
 - All time comparisons use configurable store timezone
 - ISO8601 timestamps with timezone info in all logs
 - Proper timezone conversion and handling throughout
 
 ### ✅ Rate Limiting & Retries
+
 - Exponential backoff with jitter for API calls
 - Configurable retry limits (3 default) and delays
 - Failed requests escalate to Slack with unique request IDs
 - Comprehensive error handling and recovery
 
 ### ✅ Comprehensive Auditability
+
 Every decision is logged with:
+
 - Order ID, amounts & currency
 - External references (tracking numbers, etc.)
 - API statuses and response times
@@ -75,40 +81,44 @@ Every decision is logged with:
 ### Installation
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/your-username/refund-automation.git
    cd refund-automation
    ```
 
 2. **Install dependencies:**
+
    ```bash
    # Using UV (recommended)
    uv sync
-   
+
    # Or using pip
    pip install -r requirements.txt
    ```
 
 3. **Environment Configuration:**
    Create a `.env` file in the project root:
+
    ```env
    # 17TRACK Configuration
    TRACKING_API_KEY=your_17track_api_key
    TRACKING_API_URL=https://api.17track.net/track/v2.2
-   
+
    # Shopify Configuration
    SHOPIFY_STORE_URL=your-store-name
    SHOPIFY_ACCESS_TOKEN=your_shopify_access_token
-   
+
    # Optional: Logging Configuration
    LOG_LEVEL=INFO
    ```
 
 4. **Run the automation:**
+
    ```bash
    # Using UV
    uv run main.py
-   
+
    # Or using Python directly
    python main.py
    ```
@@ -141,21 +151,25 @@ refund-automation/
 ## 🔧 How It Works
 
 ### 1. Order Discovery
+
 - Queries Shopify using GraphQL for orders with `return_status:IN_PROGRESS` and `financial_status:PAID`
 - Filters orders that have valid return shipments with tracking information
 - Processes orders in batches with pagination support
 
 ### 2. Tracking Validation
+
 - Extracts return tracking numbers from Shopify order data
 - Registers tracking numbers with 17TRACK API
 - Monitors delivery status and confirms when packages reach merchant
 
 ### 3. Refund Processing
+
 - Validates that returned items have `status: DELIVERED` and `sub_status: DELIVERED_OTHER`
 - Automatically calculates refund amounts based on original transactions
 - Creates refunds via Shopify GraphQL API with comprehensive error handling
 
 ### 4. Automation & Scheduling
+
 - GitHub Actions workflow runs every 4 hours (`0 0 */4 * *`)
 - Manual execution available via workflow dispatch
 - Comprehensive logging for audit and debugging
@@ -164,17 +178,18 @@ refund-automation/
 
 ### Environment Variables
 
-| Variable | Required | Description | Example |
-|----------|----------|-------------|----------|
-| `TRACKING_API_KEY` | ✅ | 17TRACK API authentication key | `your-17track-key` |
-| `TRACKING_API_URL` | ✅ | 17TRACK API base URL | `https://api.17track.net/track/v2.2` |
-| `SHOPIFY_STORE_URL` | ✅ | Your Shopify store name | `my-store` |
-| `SHOPIFY_ACCESS_TOKEN` | ✅ | Shopify access token with admin permissions | `shpat_xxxx` |
-| `LOG_LEVEL` | ❌ | Logging level (DEBUG, INFO, WARNING, ERROR) | `INFO` |
+| Variable               | Required | Description                                 | Example                              |
+| ---------------------- | -------- | ------------------------------------------- | ------------------------------------ |
+| `TRACKING_API_KEY`     | ✅       | 17TRACK API authentication key              | `your-17track-key`                   |
+| `TRACKING_API_URL`     | ✅       | 17TRACK API base URL                        | `https://api.17track.net/track/v2.2` |
+| `SHOPIFY_STORE_URL`    | ✅       | Your Shopify store name                     | `my-store`                           |
+| `SHOPIFY_ACCESS_TOKEN` | ✅       | Shopify access token with admin permissions | `shpat_xxxx`                         |
+| `LOG_LEVEL`            | ❌       | Logging level (DEBUG, INFO, WARNING, ERROR) | `INFO`                               |
 
 ### Shopify Permissions Required
 
 Your Shopify app needs these permissions:
+
 - `read_orders` - To fetch order information
 - `write_orders` - To create refunds
 - `read_fulfillments` - To access fulfillment data
@@ -199,6 +214,7 @@ uv run pytest --cov=src
 ```
 
 ### Test Coverage
+
 - ✅ **Order Processing**: 9 tests covering order retrieval and parsing
 - ✅ **Refund Logic**: 8 tests for refund creation and validation
 - ✅ **Data Parsing**: 3 focused tests for GraphQL data transformation
@@ -257,7 +273,6 @@ from src.monitor.webhook import handle_17track_webhook
 # Allows for immediate refund processing when packages are delivered
 ```
 
-
 ## Development Guidelines
 
 - Follow Python PEP 8 style guide
@@ -268,6 +283,7 @@ from src.monitor.webhook import handle_17track_webhook
 ## 📋 Dependencies
 
 ### Core Dependencies
+
 - **FastAPI** - Web framework (for future webhook endpoints)
 - **Requests** - HTTP client for API calls
 - **Pydantic** - Data validation and serialization

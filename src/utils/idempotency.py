@@ -151,14 +151,8 @@ class IdempotencyManager:
             "order_id": order_id,
             "operation": operation,
             "dry_run": DRY_RUN,
+            "result": result
         }
-
-        if result is not None:
-            # Store serializable result info
-            if hasattr(result, "id"):
-                entry["result_id"] = str(result.id)
-            elif isinstance(result, dict) and "id" in result:
-                entry["result_id"] = str(result["id"])
 
         self._cache[idempotency_key] = entry
         self._save_cache()
@@ -229,11 +223,11 @@ def load_cache_data(instance: "IdempotencyManager"):
     """Load idempotency cache from file."""
 
     try:
-        with open(instance.cache_file, "r") as f:
-            instance._cache = json.load(f)
-            logger.debug(
-                f"Loaded idempotency cache with {len(instance._cache)} entries"
-            )
+        if os.path.exists(instance.cache_file):
+            with open(instance.cache_file, "r") as f:
+                instance._cache = json.load(f)
+        else:
+            instance._cache = {}
     except json.decoder.JSONDecodeError as e:
         logger.warning(f"Failed to load idempotency cache: {e}")
         instance._cache = {}

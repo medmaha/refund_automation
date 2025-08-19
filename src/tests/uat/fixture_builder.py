@@ -225,13 +225,9 @@ class FixtureBuilder:
                 )
             )
 
-        total_refunded_shipping = MoneyBag(
-            amount=0.00,
-            currencyCode=currency
-        )
+        total_refunded_shipping = MoneyBag(amount=0.00, currencyCode=currency)
         total_refunded_shipping_set = MoneyBagSet(
-            shopMoney=total_refunded_shipping,
-            presentmentMoney=total_refunded_shipping
+            shopMoney=total_refunded_shipping, presentmentMoney=total_refunded_shipping
         )
 
         return ShopifyOrder(
@@ -244,5 +240,5 @@ class FixtureBuilder:
             refunds=refunds,
             returns=returns,
             transactions=transactions,
-            totalRefundedShippingSet=total_refunded_shipping_set
+            totalRefundedShippingSet=total_refunded_shipping_set,
         )

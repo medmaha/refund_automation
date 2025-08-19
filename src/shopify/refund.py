@@ -9,21 +9,15 @@ import requests
 from src.config import DRY_RUN, REQUEST_TIMEOUT, SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_URL
 from src.logger import get_logger
 from src.models.order import RefundCreateResponse, ReturnFulfillments, ShopifyOrder
-from src.models.tracking import (
-    TrackingData,
-    TrackingStatus,
-    TrackingSubStatus,
-)
 from src.shopify.graph_ql_queries import REFUND_CREATE_MUTATION
 from src.shopify.orders import retrieve_refundable_shopify_orders
-from src.shopify.refund_calculator import refund_calculator
+from src.shopify.refund_validator import order_refund_validation
 from src.utils.audit import audit_logger, log_refund_audit
 from src.utils.dry_run import create_dry_run_refund
 from src.utils.idempotency import idempotency_manager
 from src.utils.retry import exponential_backoff_retry
 from src.utils.slack import slack_notifier
 from src.utils.timezone import get_current_time_iso8601, timezone_handler
-from src.utils.timing_validator import validate_refund_timing
 
 logger = get_logger(__name__)
 
@@ -192,18 +186,6 @@ def process_refund_automation():
 
 
 def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateResponse]:
-    """
-    Process refund for a single order with comprehensive error handling,
-    idempotency, audit logging, and retry mechanisms.
-
-    Args:
-        order: ShopifyOrder to process
-        tracking: Associated tracking information
-
-    Returns:
-        RefundCreateResponse if successful, None otherwise
-    """
-
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())[:8]
 
@@ -227,7 +209,7 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
     )
 
     try:
-        _cleaned_results = __full_clean_order(order, tracking)
+        _cleaned_results = order_refund_validation(order, tracking, slack_notifier)
 
         if not _cleaned_results:
             return None
@@ -246,6 +228,7 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
                     "decision_branch": "no_valid_transactions",
                 },
             )
+
             # Log audit event
             log_refund_audit(
                 order_id=order.id,
@@ -563,278 +546,3 @@ def _execute_shopify_refund(
             error=str(e),
         )
         raise  # Re-raise for retry mechanism
-
-
-def __full_clean_order(order: ShopifyOrder, tracking: TrackingData):
-    tracking_number = order.get_tracking_number()
-    currency = order.totalPriceSet.presentmentMoney.currencyCode or "USD"
-
-    order_tags_string = "".join(order.tags).lower()
-
-    #
-    invalid_tags = [
-        "chargeback",
-        "manual-refund-only",
-        "refund-auto-off",
-        "no-auto-refund",
-        "refund:auto:off",
-        "refund:force:now",
-    ]
-
-    # A bypassing flag, when True no validation check is made
-    force_refund = any(
-        (keyword in order_tags_string) for keyword in ["refund:force:now"]
-    )
-
-    # A flag to stop the refund automation process for this order
-    is_auto_off = any((keyword in order_tags_string) for keyword in ["refund:auto:off"])
-
-    for inv_tag in invalid_tags:
-        if inv_tag in order_tags_string:
-            extra_log_details = {}
-
-            log_decision = "skipped"
-            inv_tag = inv_tag.lower()
-            err_message = f'Invalid tag detected "{inv_tag}"'
-
-            "Force should override blocking conditions"
-            if force_refund:
-                extra_log_details.update(
-                    {
-                        "tag": inv_tag,
-                        "action": "immediately processed the refund",
-                        "reason": f'Bypassed validation checks because of the "{inv_tag}"',
-                    }
-                )
-                log_decision = "bypass_blocking" if not is_auto_off else log_decision
-                err_message = (
-                    f"Force refund detected for Order({order.name}) | Warning(Force Override) |"
-                    if not is_auto_off
-                    else err_message
-                )
-
-            if is_auto_off:
-                err_message += " | Warning(Automation-Off) try a manual refund |"
-
-            logger.warning(
-                f"{err_message}: Order({order.name})",
-                extra={
-                    "order_id": order.id,
-                    "order_name": order.name,
-                    "tag": inv_tag,
-                    **extra_log_details,
-                },
-            )
-
-            # Log audit event for skipped order
-            log_refund_audit(
-                order_id=order.id,
-                order_name=order.name,
-                refund_amount=0.0,
-                currency=currency,
-                decision=log_decision,
-                tracking_number=tracking_number,
-                error=err_message,
-            )
-
-            slack_notifier.send_warning(
-                f"{err_message}: Order({order.name})",
-                details={
-                    "order_id": order.id,
-                    "order_name": order.name,
-                    "tag": inv_tag,
-                    **extra_log_details,
-                },
-            )
-
-            # Break out of this loop when force_refund is True - Avoid early return
-            if force_refund:
-                break
-
-            # When true exit immediately
-            if is_auto_off:
-                return None
-
-            # Return because the lookup tag matches the order.tags
-            return None
-
-    if not force_refund and (not tracking_number or tracking_number != tracking.number):
-        message = f"Missing tracking-no Order({order.name})"
-
-        details = {
-            "order_id": order.id,
-            "order_name": order.name,
-            "order_tracking_number": tracking_number,
-            "provided_tracking_number": tracking.number,
-        }
-
-        if tracking_number != tracking.number:
-            logger.info(
-                "ORDER",
-                extra={
-                    "abc": order.returns[0]
-                    .reverseFulfillmentOrders[0]
-                    .reverseDeliveries[0]
-                    .deliverable.tracking.model_dump_json()
-                },
-            )
-            details.update(
-                {
-                    "investigate": f"Do a review of this order on shopify admin #{order.name.replace('#', '')}"
-                }
-            )
-            message = f"Mismatched tracking numbers: OrderTracking({tracking_number})"
-
-        logger.warning(message, extra=details)
-
-        # Log audit event for skipped order
-        log_refund_audit(
-            order_id=order.id,
-            order_name=order.name,
-            refund_amount=0.0,
-            currency=currency,
-            decision="skipped",
-            tracking_number=tracking_number,
-            error=message,
-        )
-
-        slack_notifier.send_warning(message, details=details)
-        return None
-
-    latest_event = tracking.track_info.latest_event
-    if not force_refund and (not latest_event or not tracking.track_info):
-        logger.warning(
-            "No latest event found for tracking - skipping",
-            extra={"order_id": order.id, "order_name": order.name},
-        )
-
-        # Log audit event for skipped order
-        log_refund_audit(
-            order_id=order.id,
-            order_name=order.name,
-            refund_amount=0.0,
-            currency=currency,
-            decision="skipped",
-            tracking_number=tracking_number,
-            error="No latest tracking event",
-        )
-        slack_notifier.send_warning(
-            f"No latest tracking event: Order({order.name})",
-            details={
-                "order_id": order.id,
-                "order_name": order.name,
-                "delivery": str(latest_event or "N/A"),
-            },
-        )
-        return None
-
-    if not force_refund:
-        is_eligible, timing_details = validate_refund_timing(tracking)
-
-        if not is_eligible:
-            err_message = timing_details.pop(
-                "reason", "Tracking failed timing validation"
-            )
-            logger.warning(
-                err_message,
-                extra={
-                    "order_id": order.id,
-                    "order_name": order.name,
-                    **timing_details,
-                },
-            )
-            # Log audit event for skipped order
-            log_refund_audit(
-                order_id=order.id,
-                order_name=order.name,
-                refund_amount=0.0,
-                currency=currency,
-                decision="skipped",
-                tracking_number=tracking_number,
-                error=err_message,
-            )
-            slack_notifier.send_warning(
-                err_message,
-                details={
-                    "order_id": order.id,
-                    "order_name": order.name,
-                    **timing_details,
-                },
-            )
-            return None
-
-    latest_status = tracking.track_info.latest_status  # Can be null
-    tracking_status = latest_status.status.value if latest_status else None
-    tracking_sub_status = latest_status.sub_status.value if latest_status else None
-
-    if not force_refund and (
-        tracking_status != TrackingStatus.DELIVERED.value
-        or tracking_sub_status != TrackingSubStatus.DELIVERED_OTHER.value
-    ):
-        logger.warning(
-            f"Invalid tracking status for: Order({order.name})",
-            extra={
-                "order_id": order.id,
-                "order_name": order.name,
-                "tracking_status": tracking_status,
-                "tracking_sub_status": tracking_sub_status,
-            },
-        )
-
-        # Log audit event for skipped order
-        log_refund_audit(
-            order_id=order.id,
-            order_name=order.name,
-            refund_amount=0.0,
-            currency=currency,
-            decision="skipped",
-            tracking_number=tracking_number,
-            error=f"Invalid tracking status for: Order({order.name})",
-        )
-        slack_notifier.send_warning(
-            f"Invalid tracking status for: Order({order.name})",
-            details={
-                "order_id": order.id,
-                "order_name": order.name,
-                "tracking_status": tracking_status,
-                "tracking_sub_status": tracking_sub_status,
-            },
-        )
-        return None
-
-    refund_calculation = refund_calculator.calculate_refund(order, tracking)
-    idempotency_key, is_duplicated = idempotency_manager.check_operation_idempotency(
-        order.id,
-        operation="refund",
-        tracking_no=tracking.number,
-        delivered_at_iso=latest_event.time_iso,
-    )
-
-    if is_duplicated:
-        logger.warning(
-            f"Idempotency: Skipping Order: {order.id}-{order.name}",
-            extra={"idempotency_key": idempotency_key, "order_id": order.id},
-        )
-
-        # Log audit event for duplicate
-        audit_logger.log_duplicate_operation(
-            order_id=order.id,
-            order_name=order.name,
-            idempotency_key=idempotency_key,
-            original_timestamp="unknown",  # Could be enhanced to get from cache
-        )
-
-        #
-        slack_notifier.send_warning(
-            f"Duplicate refund operation detected for order {order.name} - skipping",
-            details={
-                "order_id": order.id,
-                "order_name": order.name,
-                "idempotency_key": idempotency_key,
-                "decision_branch": "duplicate_skipped",
-                "investigate": "Verify that the order is actually refunded",
-            },
-        )
-        return None
-
-    return order, refund_calculation, idempotency_key

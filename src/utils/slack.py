@@ -64,13 +64,11 @@ class SlackNotifier:
         }
 
     def __notify_slack_disabled(self):
-
         if self.notify_slack_disabled:
             return
 
         self.notify_slack_disabled = True
         logger.debug("Slack notifications disabled, skipping")
-
 
     @exponential_backoff_retry(exceptions=(requests.exceptions.RequestException,))
     def _send_to_slack(self, payload: Dict[str, Any]) -> bool:

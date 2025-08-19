@@ -47,7 +47,7 @@ class Logger(logging.Logger):
     def __init__(self, name, level=0):
         super().__init__(name, level)
 
-    def _log_with_extra(self, level:int, msg: str, *args, **kwargs):
+    def _log_with_extra(self, level: int, msg: str, *args, **kwargs):
         """Internal method to handle extra fields."""
 
         if LOG_DEBUG_ONLY and level in [logging.INFO]:

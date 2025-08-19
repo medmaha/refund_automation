@@ -385,6 +385,7 @@ class TestShippingPolicyScenarios:
         # With non-refundable shipping: no shipping refund regardless of partial return
         assert calculation_non_refundable.shipping_refund == 0.0
 
+
 class TestComplexCombinationScenarios:
     """Test combinations of discounts, taxes, and shipping policies."""
 

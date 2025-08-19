@@ -38,8 +38,7 @@ AUDIT_LOG_ENABLED = os.getenv("AUDIT_LOG_ENABLED", "true").lower() == "true"
 
 # Idempotency
 IDEMPOTENCY_SAVE_ENABLED = (
-    os.getenv("IDEMPOTENCY_SAVE_ENABLED", "true").lower() == "true"
-    if DRY_RUN else True
+    os.getenv("IDEMPOTENCY_SAVE_ENABLED", "true").lower() == "true" if DRY_RUN else True
 )
 
 __automation_id = None

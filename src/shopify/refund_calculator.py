@@ -226,10 +226,12 @@ class RefundCalculator:
                 total_line_item_refund += line_item_refund
                 returned_line_items_data.append((order_line_item, return_line_item))
 
+        # Calculate proportional shipping refund
         shipping_refund = self._calculate_proportional_shipping_refund(
             order, returned_line_items_data
         )
 
+        # Calculate proportional tax refund
         tax_refund = self._calculate_proportional_tax_refund(returned_line_items_data)
 
         # Total refund amount
@@ -281,6 +283,10 @@ class RefundCalculator:
         # Total refund for this line item
         line_item_refund = net_amount_per_unit * Decimal(str(refund_qty))
 
+        self.logger.debug(
+            f"Line item {line_item.id}: base={base_amount_per_unit}, discount={discount_per_unit}, net={net_amount_per_unit}, qty={refund_qty}, refund={line_item_refund}"
+        )
+
         return line_item_refund
 
     def _calculate_proportional_shipping_refund(
@@ -305,7 +311,7 @@ class RefundCalculator:
             )
             return Decimal("0")
 
-        if (order.totalRefundedShippingSet.presentmentMoney.amount):
+        if order.totalRefundedShippingSet.presentmentMoney.amount:
             already_refunded_shipping = Decimal(
                 str(order.totalRefundedShippingSet.presentmentMoney.amount)
             )
@@ -319,9 +325,42 @@ class RefundCalculator:
             # Adjust for partial shipping refunds already processed
             original_shipping -= already_refunded_shipping
 
-        total_order_value = Decimal(
-            order.totalPriceSet.presentmentMoney.amount
-        )
+        # Calculate total order value from line items (excluding shipping, taxes, etc.)
+        total_order_value = Decimal("0")
+        for line_item in order.lineItems:
+            try:
+                # Calculate net value per unit (original price minus discount per unit)
+                original_total = Decimal(
+                    str(line_item.originalTotalSet.presentmentMoney.amount)
+                )
+
+                # Calculate total discount for this line item
+                total_discount = Decimal("0")
+                for discount_allocation in line_item.discountAllocations:
+                    total_discount += Decimal(
+                        str(
+                            discount_allocation.allocatedAmountSet.presentmentMoney.amount
+                        )
+                    )
+
+                # Net value for this line item (after discounts)
+                net_line_item_value = original_total - total_discount
+
+                # Ensure non-negative values
+                if net_line_item_value < 0:
+                    self.logger.warning(
+                        f"Negative net value for line item {line_item.id}: {net_line_item_value}. "
+                        "Setting to 0."
+                    )
+                    net_line_item_value = Decimal("0")
+
+                total_order_value += net_line_item_value
+            except (ValueError, TypeError, AttributeError) as e:
+                self.logger.error(
+                    f"Error processing line item {line_item.id} for shipping calculation: {e}"
+                )
+                continue
+
         if total_order_value == 0:
             self.logger.warning(
                 f"Total order value is 0 for order {order.name}, cannot calculate proportional shipping"
@@ -487,7 +526,7 @@ class RefundCalculator:
                     total_tax_refund += line_item_tax_refund
 
                     self.logger.debug(
-                        f"Tax partial refund - Line item {order_line_item.id} tax: "
+                        f"Partial refund - Line item {order_line_item.id} tax: "
                         f"total={total_tax_for_line_item}, per_unit={tax_per_unit}, "
                         f"returned_qty={returned_quantity}, refund={line_item_tax_refund} "
                         f"(title: {tax_line.title}, rate: {tax_line.rate})"
@@ -499,7 +538,9 @@ class RefundCalculator:
                     )
                     continue
 
-        self.logger.info(f"Partial refund total tax calculated: LineItem({order_line_item.id}): {total_tax_refund}")
+        self.logger.info(
+            f"Partial refund total tax calculated: LineItem({order_line_item.id}): {total_tax_refund}"
+        )
         return total_tax_refund
 
     def _calculate_full_total_tax_refund(
@@ -579,7 +620,9 @@ class RefundCalculator:
                 "parentId": suggested_transaction.parentTransaction.id,
                 "kind": "REFUND",
                 "gateway": suggested_transaction.gateway,
-                "amount": self.__normalize_amount(proportional_amount-shipping_refund),
+                "amount": self.__normalize_amount(
+                    proportional_amount - shipping_refund
+                ),
             }
             transactions.append(transaction_data)
 

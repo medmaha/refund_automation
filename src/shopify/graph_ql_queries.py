@@ -15,6 +15,10 @@ query ($first: Int, $after: String, $query: String) {
         id
         name
         tags
+        disputes {
+          status
+          initiatedAs
+        }
         suggestedRefund(
           suggestFullRefund: true
           refundMethodAllocation: ORIGINAL_PAYMENT_METHODS

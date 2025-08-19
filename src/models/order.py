@@ -133,6 +133,20 @@ class DiscountApplication(BaseModel):
     targetType: str
 
 
+class OrderDispute(BaseModel):
+    status: str
+    initiatedAs: str
+
+    def is_chargeback(self):
+        opened_statuses = ["NEEDS_RESPONSE", "UNDER_REVIEW"]
+
+        # Make sure this dispute is open
+        if self.status.upper() in opened_statuses:
+            return "chargeback" == self.initiatedAs.lower()
+
+        return False
+
+
 class ShopifyOrder(BaseModel):
     id: str
     name: str
@@ -144,6 +158,7 @@ class ShopifyOrder(BaseModel):
     suggestedRefund: SuggestedRefund
     refunds: List[OrderRefunds]
     returns: List[ReturnFulfillments]
+    disputes: List[OrderDispute]
     transactions: List[OrderTransaction]
 
     return_id: Optional[str] = Field(default=None)
@@ -240,7 +255,6 @@ class ShopifyOrder(BaseModel):
 
             # Iterate through each return line item in the return fulfillment.
             for return_line_item in return_fulfillment.returnLineItems:
-
                 line_item_id = return_line_item.fulfillmentLineItem.lineItem["id"]
                 return_quantity = return_line_item.quantity
 

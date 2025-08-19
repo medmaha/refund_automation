@@ -56,26 +56,67 @@ class RefundCalculator:
         returned_line_items = self._get_returned_line_items(order)
 
         if not returned_line_items:
-            self.logger.warning(f"No returned line items found for order {order.name}")
             # Default to full refund if no return line items are specified
             return self._calculate_full_refund(order)
 
         if self._is_full_return(order, returned_line_items):
-            self.logger.info(f"Calculating full refund for order {order.name}")
             return self._calculate_full_refund(order)
         else:
-            self.logger.info(f"Calculating partial refund for order {order.name}")
             return self._calculate_partial_refund(order, returned_line_items)
 
     def _get_returned_line_items(self, order: ShopifyOrder) -> List[ReturnLineItem]:
-        """Extract returned line items from the order's return data."""
+        """
+        Extract returned line items from the order's return data.
+        """
         returned_items = []
+
+        # Get the current tracking number to identify the specific return
+        current_tracking_number = order.get_tracking_number()
+        if not current_tracking_number:
+            self.logger.warning(f"No tracking number found for order {order.name}")
+            return returned_items
+
+        # Find the specific return that matches the current tracking number
+        matching_return = None
+
+        """
+        Filtering returned_line_items by the specific return that matches
+        the current tracking to avoid including items from multiple simultaneous OPEN returns.
+        """
         for return_fulfillment in order.returns:
             if return_fulfillment.status == "OPEN":
-                for li in return_fulfillment.returnLineItems:
-                    original_qty = li.fulfillmentLineItem.lineItem.get("quantity")
-                    if li.refundableQuantity <= original_qty:
-                        returned_items.append(li)
+                for rfo in return_fulfillment.reverseFulfillmentOrders:
+                    for rd in rfo.reverseDeliveries:
+                        if (
+                            rd.deliverable.tracking.number
+                            and rd.deliverable.tracking.number
+                            == current_tracking_number
+                        ):
+                            matching_return = return_fulfillment
+                            break
+                    if matching_return:
+                        break
+            if matching_return:
+                break
+
+        if not matching_return:
+            self.logger.warning(
+                f"No return found matching tracking number {current_tracking_number} for order {order.name}"
+            )
+            return returned_items
+
+        # Only process line items from the matching return
+        for li in matching_return.returnLineItems:
+            original_qty = li.fulfillmentLineItem.lineItem.get("quantity")
+            if li.refundableQuantity <= original_qty:
+                returned_items.append(li)
+
+        self.logger.debug(
+            f"Filtered returned line items for order {order.name}: "
+            f"found {len(returned_items)} items from return {matching_return.id} "
+            f"with tracking {current_tracking_number}"
+        )
+
         return returned_items
 
     def _is_full_return(
@@ -115,16 +156,16 @@ class RefundCalculator:
             {
                 "lineItemId": item.id,
                 "quantity": item.refundableQuantity,
-                # "restockType": "RETURN",
             }
             for item in order.lineItems
         ]
 
-        # Use suggested refund from Shopify which handles original payment method allocation
+        # Using suggested refund from Shopify which handles original payment method allocation
         total_refund_amount = (
             order.suggestedRefund.amountSet.presentmentMoney.amount
             - order.priorRefundAmount
         )
+
         transactions = self._prepare_refund_transactions(order)
 
         # Calculate shipping and tax refunds
@@ -132,9 +173,7 @@ class RefundCalculator:
             order.suggestedRefund.shipping.amountSet.presentmentMoney.amount
         )
 
-        tax_refund = self._calculate_full_total_tax_refund(
-            order.lineItems, order.lineItems
-        )
+        tax_refund = self._calculate_full_total_tax_refund(order.lineItems)
 
         return RefundCalculationResult(
             refund_type="FULL",
@@ -177,7 +216,6 @@ class RefundCalculator:
                 return_line_item = {
                     "lineItemId": order_line_item.id,
                     "quantity": refund_qty,
-                    # "restockType": "RETURN",
                 }
                 refund_line_items.append(return_line_item)
 
@@ -188,15 +226,11 @@ class RefundCalculator:
                 total_line_item_refund += line_item_refund
                 returned_line_items_data.append((order_line_item, return_line_item))
 
-        # Calculate proportional shipping refund
         shipping_refund = self._calculate_proportional_shipping_refund(
             order, returned_line_items_data
         )
 
-        # Calculate proportional tax refund
-        tax_refund = self._calculate_proportional_tax_refund(
-            order.lineItems, returned_line_items_data
-        )
+        tax_refund = self._calculate_proportional_tax_refund(returned_line_items_data)
 
         # Total refund amount
         total_refund_amount = float(
@@ -206,7 +240,7 @@ class RefundCalculator:
 
         # Calculate proportional transactions
         transactions = self._calculate_proportional_transactions(
-            order, total_refund_amount
+            order, total_refund_amount, shipping_refund
         )
 
         return RefundCalculationResult(
@@ -247,10 +281,6 @@ class RefundCalculator:
         # Total refund for this line item
         line_item_refund = net_amount_per_unit * Decimal(str(refund_qty))
 
-        self.logger.debug(
-            f"Line item {line_item.id}: base={base_amount_per_unit}, discount={discount_per_unit}, net={net_amount_per_unit}, qty={refund_qty}, refund={line_item_refund}"
-        )
-
         return line_item_refund
 
     def _calculate_proportional_shipping_refund(
@@ -261,92 +291,266 @@ class RefundCalculator:
         """Calculate proportional shipping refund based on returned items."""
 
         if not returned_line_item_entries:
+            self.logger.debug("No returned line items for shipping calculation")
             return Decimal("0")
 
-        # Check if shipping value is provided
-        is_refundable_shipping = Decimal(
-            str(order.suggestedRefund.shipping.amountSet.presentmentMoney.amount)
-        )
-
-        if is_refundable_shipping == 0:
-            return Decimal("0")
-
-        # Calculate proportion of returned items by value
-        total_order_value = Decimal(str(order.totalPriceSet.presentmentMoney.amount))
-
-        if total_order_value == 0:
-            return Decimal("0")
-
-        returned_items_value = Decimal("0")
-        for line_item_entry in returned_line_item_entries:
-            order_line_item, _ = line_item_entry
-            line_item_value = Decimal(
-                str(order_line_item.originalTotalSet.presentmentMoney.amount)
-            )
-            returned_items_value += line_item_value
-
-        shipping_proportion = returned_items_value / total_order_value
         original_shipping = Decimal(
             str(order.suggestedRefund.shipping.amountSet.presentmentMoney.amount)
         )
 
-        return original_shipping * shipping_proportion
+        if original_shipping <= 0:
+            # TODO: this is not the only way to find out refundable shipping
+            self.logger.debug(
+                f"No refundable shipping for order {order.name}: {original_shipping}"
+            )
+            return Decimal("0")
+
+        if (order.totalRefundedShippingSet.presentmentMoney.amount):
+            already_refunded_shipping = Decimal(
+                str(order.totalRefundedShippingSet.presentmentMoney.amount)
+            )
+
+            if already_refunded_shipping >= original_shipping:
+                self.logger.debug(
+                    f"Shipping already fully refunded for order {order.name}"
+                )
+                return Decimal("0")
+
+            # Adjust for partial shipping refunds already processed
+            original_shipping -= already_refunded_shipping
+
+        total_order_value = Decimal(
+            order.totalPriceSet.presentmentMoney.amount
+        )
+        if total_order_value == 0:
+            self.logger.warning(
+                f"Total order value is 0 for order {order.name}, cannot calculate proportional shipping"
+            )
+            return Decimal("0")
+
+        # Calculate returned items value based on actual returned quantities
+        returned_items_value = Decimal("0")
+        for line_item_entry in returned_line_item_entries:
+            order_line_item, return_line_item = line_item_entry
+            returned_quantity = return_line_item["quantity"]
+
+            if returned_quantity <= 0:
+                self.logger.warning(
+                    f"Invalid returned quantity {returned_quantity} for line item {order_line_item.id}"
+                )
+                continue
+
+            if returned_quantity > order_line_item.quantity:
+                self.logger.warning(
+                    f"Returned quantity {returned_quantity} exceeds original quantity {order_line_item.quantity} "
+                    f"for line item {order_line_item.id}, capping to original quantity"
+                )
+                returned_quantity = order_line_item.quantity
+
+            try:
+                original_total = Decimal(
+                    str(order_line_item.originalTotalSet.presentmentMoney.amount)
+                )
+
+                # Calculate total discount for this line item
+                total_discount = Decimal("0")
+                for discount_allocation in order_line_item.discountAllocations:
+                    total_discount += Decimal(
+                        str(
+                            discount_allocation.allocatedAmountSet.presentmentMoney.amount
+                        )
+                    )
+
+                # Net value per unit (after discounts)
+                if order_line_item.quantity <= 0:
+                    self.logger.error(
+                        f"Invalid original quantity {order_line_item.quantity} for line item {order_line_item.id}"
+                    )
+                    continue
+
+                net_value_per_unit = (original_total - total_discount) / Decimal(
+                    str(order_line_item.quantity)
+                )
+
+                # Ensure non-negative unit value
+                if net_value_per_unit < 0:
+                    self.logger.warning(
+                        f"Negative net unit value for line item {order_line_item.id}: {net_value_per_unit}. "
+                        "Setting to 0."
+                    )
+                    net_value_per_unit = Decimal("0")
+
+                # Add proportional value for returned quantity
+                line_returned_value = net_value_per_unit * Decimal(
+                    str(returned_quantity)
+                )
+                returned_items_value += line_returned_value
+
+                self.logger.debug(
+                    f"Line item {order_line_item.id}: net_unit_value={net_value_per_unit}, "
+                    f"returned_qty={returned_quantity}, line_returned_value={line_returned_value}"
+                )
+
+            except (ValueError, TypeError, ZeroDivisionError) as e:
+                self.logger.error(
+                    f"Error calculating returned value for line item {order_line_item.id}: {e}"
+                )
+                continue
+
+        if returned_items_value <= 0:
+            self.logger.warning(
+                f"No positive returned item value calculated for order {order.name}"
+            )
+            return Decimal("0")
+
+        # Calculate shipping proportion with bounds checking
+        shipping_proportion = returned_items_value / total_order_value
+
+        # Ensure proportion doesn't exceed 100%
+        if shipping_proportion > 1:
+            self.logger.warning(
+                f"Shipping proportion exceeds 100% ({shipping_proportion}) for order {order.name}, "
+                "capping to 100%"
+            )
+            shipping_proportion = Decimal("1")
+
+        proportional_shipping = original_shipping * shipping_proportion
+
+        self.logger.debug(
+            f"Proportional shipping calculation for order {order.name}: "
+            f"returned_value={returned_items_value}, total_order_value={total_order_value}, "
+            f"proportion={shipping_proportion}, original_shipping={original_shipping}, "
+            f"proportional_shipping={proportional_shipping}"
+        )
+
+        return proportional_shipping
 
     def _calculate_proportional_tax_refund(
         self,
-        all_line_items: List[LineItem],
         returned_line_item_entries: List[tuple[LineItem, dict]],
     ):
-        """Calculate total tax refund for returned line items."""
+        """Calculate proportional tax refund for returned line items based on quantities."""
+
+        if not returned_line_item_entries:
+            self.logger.debug("No returned line items for tax calculation")
+            return Decimal("0")
 
         total_tax_refund = Decimal("0")
         for line_item_entry in returned_line_item_entries:
             order_line_item, return_line_item = line_item_entry
+            returned_quantity = return_line_item["quantity"]
 
-            # Find the corresponding original line item to get the original quantity
-            original_line_item = next(
-                (item for item in all_line_items if item.id == order_line_item.id), None
-            )
+            # Validation: ensure returned quantity is valid
+            if returned_quantity <= 0:
+                self.logger.warning(
+                    f"Invalid returned quantity {returned_quantity} for line item {order_line_item.id}"
+                )
+                continue
 
-            if original_line_item:
-                # Determine the returned quantity.  We need to find the return line item
-                # that matches this line item to get the quantity returned.
-                returned_quantity = return_line_item["quantity"]
+            if returned_quantity > order_line_item.quantity:
+                self.logger.warning(
+                    f"Returned quantity {returned_quantity} exceeds original quantity {order_line_item.quantity} "
+                    f"for line item {order_line_item.id}, capping to original quantity"
+                )
+                returned_quantity = order_line_item.quantity
 
-                for tax_line in order_line_item.taxLines:
-                    # Calculate proportional tax based on returned quantity vs original quantity
-                    tax_per_unit = Decimal(
+            # Process tax lines for this line item
+            if not order_line_item.taxLines:
+                self.logger.debug(
+                    f"No tax lines found for line item {order_line_item.id}"
+                )
+                continue
+
+            for tax_line in order_line_item.taxLines:
+                try:
+                    # Calculate tax per unit based on original quantity
+                    total_tax_for_line_item = Decimal(
                         str(tax_line.priceSet.presentmentMoney.amount)
-                    ) / Decimal(str(order_line_item.refundableQuantity))
+                    )
 
-                    total_tax_refund += tax_per_unit * Decimal(str(returned_quantity))
+                    # Validation: ensure original quantity is valid
+                    if order_line_item.quantity <= 0:
+                        self.logger.error(
+                            f"Invalid original quantity {order_line_item.quantity} for line item {order_line_item.id}"
+                        )
+                        continue
 
+                    # Calculate tax per unit using original quantity
+                    tax_per_unit = total_tax_for_line_item / Decimal(
+                        str(order_line_item.quantity)
+                    )
+
+                    # Calculate proportional tax refund for returned quantity
+                    line_item_tax_refund = tax_per_unit * Decimal(
+                        str(returned_quantity)
+                    )
+                    total_tax_refund += line_item_tax_refund
+
+                    self.logger.debug(
+                        f"Tax partial refund - Line item {order_line_item.id} tax: "
+                        f"total={total_tax_for_line_item}, per_unit={tax_per_unit}, "
+                        f"returned_qty={returned_quantity}, refund={line_item_tax_refund} "
+                        f"(title: {tax_line.title}, rate: {tax_line.rate})"
+                    )
+
+                except (ValueError, TypeError, ZeroDivisionError) as e:
+                    self.logger.error(
+                        f"Error calculating tax for line item {order_line_item.id}: {e}"
+                    )
+                    continue
+
+        self.logger.info(f"Partial refund total tax calculated: LineItem({order_line_item.id}): {total_tax_refund}")
         return total_tax_refund
 
     def _calculate_full_total_tax_refund(
-        self, all_line_items: List[LineItem], returned_line_item_entries: List[LineItem]
+        self, returned_line_item_entries: List[LineItem]
     ):
-        """Calculate total tax refund for returned line items."""
+        """Calculate total tax refund for full refund - sum all tax amounts from all line items."""
+
+        if not returned_line_item_entries:
+            self.logger.debug("No line items for full refund tax calculation")
+            return Decimal("0")
 
         total_tax_refund = Decimal("0")
         for line_item in returned_line_item_entries:
-            # Find the corresponding original line item to get the original quantity
-            original_line_item = next(
-                (item for item in all_line_items if item.id == line_item.id), None
-            )
+            if not line_item.taxLines:
+                self.logger.debug(
+                    f"No tax lines found for line item {line_item.id} in full refund"
+                )
+                continue
 
-            if original_line_item:
-                returned_quantity = len(returned_line_item_entries)
-                for tax_line in line_item.taxLines:
-                    tax_per_unit = Decimal(
-                        str(tax_line.priceSet.presentmentMoney.amount)
+            # For full refunds, we refund all tax on each line item
+            for tax_line in line_item.taxLines:
+                try:
+                    # Tax line already contains the total tax for this line item
+                    tax_amount = Decimal(str(tax_line.priceSet.presentmentMoney.amount))
+
+                    # Validation: ensure tax amount is non-negative
+                    if tax_amount < 0:
+                        self.logger.warning(
+                            f"Negative tax amount {tax_amount} found for line item {line_item.id}, "
+                            f"tax line: {tax_line.title}"
+                        )
+                        continue
+
+                    total_tax_refund += tax_amount
+
+                    self.logger.debug(
+                        f"Full refund - Line item {line_item.id} tax: {tax_amount} "
+                        f"(title: {tax_line.title}, rate: {tax_line.rate})"
                     )
-                    total_tax_refund += tax_per_unit * Decimal(str(returned_quantity))
 
+                except (ValueError, TypeError) as e:
+                    self.logger.error(
+                        f"Error processing tax amount for line item {line_item.id}: {e}"
+                    )
+                    continue
+
+        self.logger.info(f"Full refund total tax calculated: {total_tax_refund}")
         return total_tax_refund
 
     def _calculate_proportional_transactions(
-        self, order: ShopifyOrder, refund_amount: float
+        self, order: ShopifyOrder, refund_amount: float, shipping_refund: float
     ) -> List[Dict]:
         """Calculate proportional transaction amounts for partial refunds."""
 
@@ -375,7 +579,7 @@ class RefundCalculator:
                 "parentId": suggested_transaction.parentTransaction.id,
                 "kind": "REFUND",
                 "gateway": suggested_transaction.gateway,
-                "amount": self.__normalize_amount(proportional_amount),
+                "amount": self.__normalize_amount(proportional_amount-shipping_refund),
             }
             transactions.append(transaction_data)
 

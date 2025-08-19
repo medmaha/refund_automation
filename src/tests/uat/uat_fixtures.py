@@ -54,7 +54,6 @@ class UATFixtureBuilder(FixtureBuilder):
             "discounts": [],
             "tax_rate": UATConstants.VAT_RATE,
             "tax_amount": 0.0,
-            "restocking_fee": 0.0,
             "shipping_amount": 0.0,
         }
 
@@ -209,7 +208,6 @@ class UATFixtureBuilder(FixtureBuilder):
 
     def with_restocking_fee(self, amount: float):
         """Add restocking fee."""
-        self._order_data["restocking_fee"] = amount
         return self
 
     def with_no_tracking_no(self):
@@ -550,10 +548,10 @@ def create_b_d2_order(
     full_refund=False, with_shipping=False
 ) -> tuple[ShopifyOrder, dict]:
     """B-D2: Line-level fixed discount."""
-    item_1_qty = 2  # 120
+    item_1_qty = 2
     item_2_qty = 1
-    item_1_amount = 60.0
-    item_2_amount = 45.99
+    item_1_amount = 50.0  # 50 * 2 = 100
+    item_2_amount = 70.0  # 70 * 1 = 70
 
     expected_refund = item_1_amount
 
@@ -587,13 +585,7 @@ def create_b_d2_order(
 
     fx = fx.build()
 
-    return fx, {
-        "item_1_qty": item_1_qty,
-        "item_2_qty": item_2_qty,
-        "item_1_amount": item_1_amount,
-        "item_2_amount": item_2_amount,
-        "expected_refund": expected_refund,
-    }
+    return fx
 
 
 def create_b_t1_order(full_refund=False):
@@ -646,23 +638,6 @@ def create_b_s2_order(shipping_amount=15.0) -> ShopifyOrder:
         .with_line_item(quantity=2, price=50.0)
         .with_shipping(shipping_amount, refundable=False)
         .with_return_tracking()
-        .with_transaction(UATConstants.SHOPIFY_PAYMENTS, TransactionKind.SALE)
-        .build()
-    )
-
-
-def create_b_r1_order(full_return=False, shipping_amount=0) -> ShopifyOrder:
-    """B-R1: Restocking fee enabled."""
-    return (
-        UATFixtureBuilder()
-        .with_id_and_name("gid://shopify/Order/BR1001", "BR1-RESTOCK-FEE-001")
-        .with_line_item("gid://shopify/Order/BR100A1", quantity=2, price=50.0)
-        .with_restocking_fee(5.0)
-        .with_shipping(shipping_amount, refundable=bool(shipping_amount))
-        .with_return_tracking()
-        .with_return_line_item(
-            "gid://shopify/Order/BR100A1", refundable_qty=(2 if full_return else 1)
-        )
         .with_transaction(UATConstants.SHOPIFY_PAYMENTS, TransactionKind.SALE)
         .build()
     )

@@ -25,7 +25,6 @@ MAX_SHOPIFY_ORDER_DATA = 10_000
 TRACKING_SEGMENT_SIZE = 40  # Maximum trackings per API call
 
 ELIGIBLE_ORDERS_QUERY = """
-name:1016
 financial_status:PAID OR
 financial_status:PARTIALLY_PAID OR
 financial_status:PARTIALLY_REFUNDED AND

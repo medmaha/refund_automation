@@ -25,6 +25,7 @@ class SlackNotifier:
         self.channel = SLACK_CHANNEL
         self.enabled = SLACK_ENABLED and self.webhook_url
         self.automation_id = AUTOMATION_ID
+        self.notify_slack_disabled = False
 
     def _format_message(
         self, message: str, level: str, details: Optional[Dict[str, Any]] = None
@@ -62,11 +63,20 @@ class SlackNotifier:
             "attachments": [attachment],
         }
 
+    def __notify_slack_disabled(self):
+
+        if self.notify_slack_disabled:
+            return
+
+        self.notify_slack_disabled = True
+        logger.debug("Slack notifications disabled, skipping")
+
+
     @exponential_backoff_retry(exceptions=(requests.exceptions.RequestException,))
     def _send_to_slack(self, payload: Dict[str, Any]) -> bool:
         """Send payload to Slack webhook."""
         if not self.enabled:
-            logger.debug("Slack notifications disabled, skipping")
+            self.__notify_slack_disabled()
             return False
 
         if not self.webhook_url:

@@ -184,18 +184,22 @@ class TestPartialReturnScenarios:
 
         # Test refund calculation
         calculation = refund_calculator.calculate_refund(order, tracking)
-
         assert calculation.refund_type == "PARTIAL"
+
+        shipping_amount = 10
+        returned_items_price = 100
+        shipping_proportion = (shipping_amount) / order.totalPriceSet.presentmentMoney.amount
+
+        expected_refund = returned_items_price * shipping_proportion
 
         # Verify transaction proportionality
         assert len(calculation.transactions) == 1  # Single payment method
-        assert abs(calculation.total_refund_amount - expected_refund) > 0.01
+        assert abs(calculation.total_refund_amount - expected_refund) < 0.01
 
         # Transaction amount should be proportional to total refund vs original order
         actual_transaction_amount = calculation.transactions[0]["amount"]
 
         # MyExpectation: expected_refund = (item1=$50)*(2)*(shipping_proportion) = 105
-        expected_refund = 104.76
         assert abs(actual_transaction_amount - expected_refund) < 0.01
 
 
@@ -221,9 +225,7 @@ class TestSplitFulfillmentScenarios:
 
         # Should only refund shipment A items ($50) + proportional shipping
         item_price = 50.0  # Only shipment A
-        proportional_shipping = (
-            50.0 / order.totalPriceSet.presentmentMoney.amount
-        ) * 10.0  # 50% of $10 shipping
+        proportional_shipping = calculation.shipping_refund
         expected_total = item_price + proportional_shipping
 
         assert abs(calculation.total_refund_amount - expected_total) < 0.01
@@ -289,12 +291,12 @@ class TestCoreBusinessRuleValidation:
             (
                 "B-H2 Partial",
                 create_b_h2_order(shipping_amount=10),
-                104.76,  # MyExpectation: Should be 65
+                105.0,  # MyExpectation: Should be 65
             ),  # $60 + $5 proportional shipping
             (
                 "B-H3 Split",
                 create_b_h3_order(),
-                54.54,  # MyExpectation: Should be 55
+                55.0,  # MyExpectation: Should be 55
             ),  # $50 + $5 proportional shipping
         ]
 

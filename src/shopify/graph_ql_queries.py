@@ -88,7 +88,6 @@ query ($first: Int, $after: String, $query: String) {
             id
             quantity
             isGiftCard
-            restockable
             refundableQuantity
             originalTotalSet {
               presentmentMoney {
@@ -136,8 +135,6 @@ query ($first: Int, $after: String, $query: String) {
                 ... on ReturnLineItem {
                   id
                   quantity
-                  returnReason
-                  returnReasonNote
                   refundableQuantity
                   fulfillmentLineItem {
                     id
@@ -145,6 +142,7 @@ query ($first: Int, $after: String, $query: String) {
                       id
                       name
                       quantity
+                      isGiftCard
                     }
                   }
                 }
@@ -181,21 +179,9 @@ query ($first: Int, $after: String, $query: String) {
             nodes {
               lineItem {
                 id
+                isGiftCard
               }
               quantity
-              restockType
-            }
-          }
-          refundShippingLines(first: 5) {
-            edges {
-              node {
-                subtotalAmountSet {
-                  presentmentMoney {
-                    amount
-                    currencyCode
-                  }
-                }
-              }
             }
           }
         }

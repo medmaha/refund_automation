@@ -268,32 +268,6 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
             )
             return None
 
-        # Use calculated refund data
-        refund_note = f"{refund_calculation.refund_type} refund - return to original payment methods"
-        if refund_calculation.refund_type == "PARTIAL":
-            refund_note += f" (${refund_calculation.total_refund_amount:.2f} of ${order_amount:.2f})"
-
-        shipping = {}
-        if refund_calculation.refund_type == "FULL":
-            shipping = {"fullRefund": True}
-        elif (
-            refund_calculation.refund_type == "PARTIAL"
-            and refund_calculation.shipping_refund
-        ):
-            shipping = {"amount": refund_calculation.shipping_refund}
-
-        # Prepare GraphQL variables with calculated data
-        variables = {
-            "input": {
-                "notify": True,
-                "orderId": order.id,
-                "transactions": refund_calculation.transactions,
-                "refundLineItems": refund_calculation.line_items_to_refund,
-                "note": refund_note,
-                "shipping": shipping,
-            }
-        }
-
         logger.info(
             f"Sending {refund_calculation.refund_type} refund request to Shopify for order {order.name}",
             extra={
@@ -308,6 +282,24 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
         )
 
         if EXECUTION_MODE == "LIVE":
+            # Prepare GraphQL variables with calculated data
+            refund_note = f"{refund_calculation.refund_type.capitalize()} refund - Total: ${refund_calculation.total_refund_amount}"
+
+            shipping = {}
+            if refund_calculation.shipping_refund:
+                shipping.update({"amount": refund_calculation.shipping_refund})
+
+            variables = {
+                "input": {
+                    "notify": True,
+                    "note": refund_note,
+                    "orderId": order.id,
+                    "shipping": shipping,
+                    "transactions": refund_calculation.transactions,
+                    "refundLineItems": refund_calculation.line_items_to_refund,
+                }
+            }
+
             # Execute the actual refund with retry mechanism
             refund = _execute_shopify_refund(order, variables, request_id)
         else:
@@ -366,9 +358,7 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
                     "request_id": request_id,
                     "order_name": order.name,
                     "tracking_number": tracking_number,
-                    **refund_calculation.model_dump(
-                        exclude=["line_items_to_refund", "transactions"]
-                    ),
+                    **refund_calculation.model_dump(),
                 },
             )
 

@@ -3,7 +3,7 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-from src.config import DRY_RUN
+from src.config import DRY_RUN, IDEMPOTENCY_SAVE_ENABLED
 from src.logger import get_logger
 from src.utils.timezone import get_current_time_iso8601
 
@@ -37,7 +37,11 @@ class IdempotencyManager:
 
     def _save_cache(self):
         """Save idempotency cache to file."""
-        save_cache_data(self)
+        if IDEMPOTENCY_SAVE_ENABLED:
+            save_cache_data(self)
+            return
+
+        logger.debug(f"Idempotency saving disabled, cache file: {self.cache_file}")
 
     def _cleanup_expired_entries(self):
         """Remove expired entries from cache."""
@@ -148,6 +152,7 @@ class IdempotencyManager:
         """
         entry = {
             "timestamp": get_current_time_iso8601(),
+            "ttl_hours": self.ttl_hours,
             "order_id": order_id,
             "operation": operation,
             "dry_run": DRY_RUN,

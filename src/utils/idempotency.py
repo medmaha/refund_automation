@@ -220,7 +220,7 @@ class IdempotencyManager:
             Tuple of (idempotency_key, is_duplicate)
         """
         key = idempotency_manager.generate_key(order_id, operation, **kwargs)
-        is_duplicate = idempotency_manager.is_duplicate_operation(key)
+        is_duplicate = idempotency_manager.get_operation_result(key)
         return key, is_duplicate
 
 

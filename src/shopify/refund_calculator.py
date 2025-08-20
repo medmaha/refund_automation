@@ -1,11 +1,3 @@
-"""
-Refund calculation logic for handling partial returns and proportional refunds.
-
-This module implements the business rules:
-- B1. Full Return → Full Original Amount
-- B2. Partial Return → Proportional Refund
-- B3. Split Fulfillment → Only refund items received back
-"""
 
 from decimal import ROUND_DOWN, Decimal
 from typing import Dict, List, Literal, Union
@@ -242,7 +234,7 @@ class RefundCalculator:
 
         # Calculate proportional transactions
         transactions = self._calculate_proportional_transactions(
-            order, total_refund_amount, shipping_refund
+            order, total_refund_amount
         )
 
         return RefundCalculationResult(
@@ -428,7 +420,7 @@ class RefundCalculator:
                 self.logger.debug(
                     f"Line item {order_line_item.id}: net_unit_value={net_value_per_unit}, "
                     f"returned_qty={returned_quantity}, line_returned_value={line_returned_value}"
-                )
+                ) 
 
             except (ValueError, TypeError, ZeroDivisionError) as e:
                 self.logger.error(
@@ -591,7 +583,7 @@ class RefundCalculator:
         return total_tax_refund
 
     def _calculate_proportional_transactions(
-        self, order: ShopifyOrder, refund_amount: float, shipping_refund: float
+        self, order: ShopifyOrder, refund_amount: float
     ) -> List[Dict]:
         """Calculate proportional transaction amounts for partial refunds."""
 
@@ -621,7 +613,7 @@ class RefundCalculator:
                 "kind": "REFUND",
                 "gateway": suggested_transaction.gateway,
                 "amount": self.__normalize_amount(
-                    proportional_amount - shipping_refund
+                    proportional_amount
                 ),
             }
             transactions.append(transaction_data)

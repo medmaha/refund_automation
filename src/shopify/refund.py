@@ -9,9 +9,11 @@ import requests
 from src.config import DRY_RUN, REQUEST_TIMEOUT, SHOPIFY_ACCESS_TOKEN, SHOPIFY_STORE_URL
 from src.logger import get_logger
 from src.models.order import RefundCreateResponse, ReturnFulfillments, ShopifyOrder
+from src.models.tracking import TrackingData
 from src.shopify.graph_ql_queries import REFUND_CREATE_MUTATION
 from src.shopify.orders import retrieve_refundable_shopify_orders
-from src.shopify.refund_validator import order_refund_validation
+from src.shopify.refund_calculator import refund_calculator
+from src.shopify.refund_validator import validate_order_before_refund
 from src.utils.audit import audit_logger, log_refund_audit
 from src.utils.dry_run import create_dry_run_refund
 from src.utils.idempotency import idempotency_manager
@@ -185,7 +187,7 @@ def process_refund_automation():
         )
 
 
-def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateResponse]:
+def refund_order(order: ShopifyOrder, tracking=TrackingData) -> Optional[RefundCreateResponse]:
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())[:8]
 
@@ -209,13 +211,46 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
     )
 
     try:
-        _cleaned_results = order_refund_validation(order, tracking, slack_notifier)
-
-        if not _cleaned_results:
+        # Validate the order and the tracking information before performing any mutations
+        is_valid_refund = validate_order_before_refund(order, tracking, slack_notifier)
+        if not is_valid_refund:
             return None
 
-        order, refund_calculation, idempotency_key = _cleaned_results
+        idempotency_key, is_duplicated = idempotency_manager.check_operation_idempotency(
+            order.id,
+            operation="refund",
+            tracking_no=tracking.number,
+            refund_id=order.valid_return_shipment.id,
+        )
 
+        if is_duplicated:
+            cached_results = idempotency_manager.get_operation_result(idempotency_key)
+            logger.warning(
+                f"Idempotency: Skipping Order: {order.id}-{order.name}",
+                extra={"idempotency_key": idempotency_key, "order_id": order.id},
+            )
+            audit_logger.log_duplicate_operation(
+                order_id=order.id,
+                order_name=order.name,
+                idempotency_key=idempotency_key,
+                original_timestamp=cached_results.get("timestamp"),
+            )
+            slack_notifier.send_warning(
+                f"Duplicate refund operation detected for order {order.name} - skipping",
+                details={
+                    "order_id": order.id,
+                    "order_name": order.name,
+                    "idempotency_key": idempotency_key,
+                    "decision_branch": "duplicate_skipped",
+                    "investigate": "Verify that the order is actually refunded",
+                },
+            )
+            return None
+
+        # Get the monetary calculations of this refund
+        refund_calculation = refund_calculator.calculate_refund(order, tracking)
+
+        # Ensuring at least a single transactions exists
         if not refund_calculation.transactions:
             error_msg = (
                 f"No valid transactions calculated for refund in order {order.name}"
@@ -228,8 +263,6 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
                     "decision_branch": "no_valid_transactions",
                 },
             )
-
-            # Log audit event
             log_refund_audit(
                 order_id=order.id,
                 order_name=order.name,
@@ -251,38 +284,41 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
             )
             return None
 
+        return_id = order.valid_return_shipment.id
+
         logger.info(
             f"Sending {refund_calculation.refund_type} refund request to Shopify for order {order.name}",
             extra={
+                "mode": EXECUTION_MODE,
                 "order_id": order.id,
                 "order_name": order.name,
-                "mode": EXECUTION_MODE,
+                "return_id": return_id,
                 "request_id": request_id,
-                "refund_type": refund_calculation.refund_type,
-                "refund_amount": refund_calculation.total_refund_amount,
-                "transaction_count": len(refund_calculation.transactions),
+                "tracking_number": tracking_number,
+                **refund_calculation.model_dump(
+                    exclude=["line_items_to_refund", "transactions"]
+                ),
             },
         )
 
-        if EXECUTION_MODE == "LIVE":
-            # Prepare GraphQL variables with calculated data
-            refund_note = f"{refund_calculation.refund_type.capitalize()} refund - Total: ${refund_calculation.total_refund_amount}"
+        # Prepare GraphQL variables with calculated data
+        shipping = {}
+        if refund_calculation.shipping_refund:
+            shipping.update({"amount": refund_calculation.shipping_refund})
 
-            shipping = {}
-            if refund_calculation.shipping_refund:
-                shipping.update({"amount": refund_calculation.shipping_refund})
-
-            variables = {
-                "input": {
-                    "notify": True,
-                    "note": refund_note,
-                    "orderId": order.id,
-                    "shipping": shipping,
-                    "transactions": refund_calculation.transactions,
-                    "refundLineItems": refund_calculation.line_items_to_refund,
-                }
+        refund_note = f"{refund_calculation.refund_type.capitalize()} refund - Total: ${refund_calculation.total_refund_amount}"
+        variables = {
+            "input": {
+                "notify": True,
+                "note": refund_note,
+                "orderId": order.id,
+                "shipping": shipping,
+                "transactions": refund_calculation.transactions,
+                "refundLineItems": refund_calculation.line_items_to_refund,
             }
+        }
 
+        if EXECUTION_MODE == "LIVE":
             # Execute the actual refund with retry mechanism
             refund = _execute_shopify_refund(order, variables, request_id)
         else:
@@ -290,7 +326,6 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
             refund = create_dry_run_refund(order, refund_calculation)
 
         if refund:
-            # Log successful audit event
             log_refund_audit(
                 order_id=order.id,
                 order_name=order.name,
@@ -301,12 +336,11 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
                 idempotency_key=idempotency_key,
                 refund_id=refund.id,
             )
-
-            # Send success notification
             slack_notifier.send_success(
                 f"Refund successfully processed for order {order.name}",
                 details={
                     "order_id": order.id,
+                    "return_id": return_id,
                     "refund_id": refund.id,
                     "request_id": request_id,
                     "order_name": order.name,
@@ -316,11 +350,11 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
                     ),
                 },
             )
-
             logger.info(
                 f"Refund successfully processed for order {order.name}",
                 extra={
                     "order_id": order.id,
+                    "return_id": return_id,
                     "refund_id": refund.id,
                     "request_id": request_id,
                     "order_name": order.name,
@@ -330,21 +364,21 @@ def refund_order(order: ShopifyOrder, tracking=None) -> Optional[RefundCreateRes
                     ),
                 },
             )
-
             idempotency_manager.mark_operation_completed(
                 idempotency_key,
                 order_id=order.id,
                 operation="refund",
                 result={
                     "order_id": order.id,
+                    "return_id": return_id,
                     "refund_id": refund.id,
                     "request_id": request_id,
                     "order_name": order.name,
                     "tracking_number": tracking_number,
+                    "variables": variables,
                     **refund_calculation.model_dump(),
                 },
             )
-
         else:
             raise ValueError("Refund Creation Failed")
 

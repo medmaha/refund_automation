@@ -187,7 +187,9 @@ def process_refund_automation():
         )
 
 
-def refund_order(order: ShopifyOrder, tracking=TrackingData) -> Optional[RefundCreateResponse]:
+def refund_order(
+    order: ShopifyOrder, tracking=TrackingData
+) -> Optional[RefundCreateResponse]:
     # Generate request ID for tracking
     request_id = str(uuid.uuid4())[:8]
 
@@ -216,11 +218,13 @@ def refund_order(order: ShopifyOrder, tracking=TrackingData) -> Optional[RefundC
         if not is_valid_refund:
             return None
 
-        idempotency_key, is_duplicated = idempotency_manager.check_operation_idempotency(
-            order.id,
-            operation="refund",
-            tracking_no=tracking.number,
-            refund_id=order.valid_return_shipment.id,
+        idempotency_key, is_duplicated = (
+            idempotency_manager.check_operation_idempotency(
+                order.id,
+                operation="refund",
+                tracking_no=tracking.number,
+                refund_id=order.valid_return_shipment.id,
+            )
         )
 
         if is_duplicated:

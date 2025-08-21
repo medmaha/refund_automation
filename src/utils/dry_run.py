@@ -14,7 +14,7 @@ def create_dry_run_refund(
     """Create a mock refund for dry run mode using refund calculation."""
     from src.models.order import MoneyBag, MoneyBagSet
 
-    amount = sum([tnx["amount"] for tnx in refund_calculation.transactions])
+    amount = refund_calculation.total_refund_amount
     currencyCode = order.totalPriceSet.presentmentMoney.currencyCode
 
     # Create refund money set based on calculated amount

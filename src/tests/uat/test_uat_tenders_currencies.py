@@ -217,21 +217,16 @@ class TestMixedPaymentScenarios:
 class TestStoreCreditScenarios:
     """Test B-P3: Store credit used → Refund store credit portion to store credit."""
 
+    @patch("src.shopify.refund.requests")
     @patch("src.shopify.refund.slack_notifier")
-    @patch("src.shopify.refund.idempotency_manager")
+    @patch("src.shopify.refund.idempotency_manager._save_cache")
     def test_b_p3_store_credit_payment_refund_to_store_credit(
-        self, mock_idempotency, mock_slack
+        self, mock_idempotency_save, mock_slack, mock_requests
     ):
         """B-P3: Store credit payment should refund back to store credit."""
-        # Setup
-        mock_idempotency.check_operation_idempotency.return_value = (
-            "test_key_bp3",
-            False,
-        )
 
-        order = (
-            create_b_p3_order()
-        )  # $100 items + $10 shipping = $110, paid via store credit
+        # $100 items + $10 shipping = $110, paid via store credit
+        order = create_b_p3_order(shipping_amount=10)
         tracking = create_delivered_tracking(tracking_number=order.tracking_number)
 
         # Verify payment structure

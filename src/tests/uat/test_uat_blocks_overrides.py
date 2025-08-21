@@ -362,7 +362,8 @@ class TestRefundForceNowScenarios:
         order = create_refund_force_now_order()
 
         # Use early tracking that would normally be too early
-        tracking = create_early_delivery_tracking()  # Only delivered a few hours ago
+        # Only delivered a few hours ago
+        tracking = create_early_delivery_tracking(tracking_number=order.tracking_number)
 
         # Verify order has refund:force:now tag
         assert "refund:force:now" in order.tags
@@ -416,16 +417,11 @@ class TestRefundForceNowScenarios:
         )
 
         # Process with force override
-        with patch(
-            "src.shopify.refund.retrieve_refundable_shopify_orders"
-        ) as mock_retrieve:
-            mock_retrieve.return_value = [(order, tracking)]
+        refund_order(order, tracking)
 
-            safe_process_refund_automation()
-
-            # Should succeed despite timing constraint
-            success_calls = mock_slack.send_success.call_args_list
-            assert len(success_calls) > 0, "Should bypass timing with force:now"
+        # Should succeed despite timing constraint
+        success_calls = mock_slack.send_success.call_args_list
+        assert len(success_calls) > 0, "Should bypass timing with force:now"
 
     @patch("src.shopify.refund.requests")
     @patch("src.shopify.refund.slack_notifier")
@@ -441,18 +437,20 @@ class TestRefundForceNowScenarios:
 
         order = (
             UATFixtureBuilder()
-            .with_line_item(quantity=2, price=50.0)
+            .with_line_item("gid://shopify/Order/W9I3D3EJ93ISW", quantity=2, price=50.0)
             .with_transaction(
                 UATConstants.SHOPIFY_PAYMENTS, TransactionKind.SALE, 100.0
             )
-            .with_tags(
-                "refund:force:now", "some-other-block"
-            )  # Force should override blocks
-            .with_return_tracking("BTAG2_BLOCK_TEST")
+            # Force should override blocks
+            .with_tags("refund:force:now", "chargeback", "refund:auto:off", "dispute")
+            .with_return_tracking()
+            .with_return_line_item(
+                "gid://shopify/Order/W9I3D3EJ93ISW", refundable_qty=2
+            )
             .build()
         )
 
-        tracking = create_early_delivery_tracking()
+        tracking = create_early_delivery_tracking(order.tracking_number)
 
         refund_order(order, tracking)
 
@@ -468,7 +466,7 @@ class TestRefundForceNowScenarios:
         )
 
         alert_content = " ".join(str(alert) for alert in all_alerts).lower()
-        mentions_force = (keyword in alert_content for keyword in ["force", "override"])
+        mentions_force = (keyword in alert_content for keyword in ["refund:force:now"])
 
         assert mentions_force, "Should log force override action"
 

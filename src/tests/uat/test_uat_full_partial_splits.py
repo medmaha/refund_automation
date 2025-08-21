@@ -190,9 +190,12 @@ class TestPartialReturnScenarios:
         returned_items_price = 100
         shipping_proportion = (
             shipping_amount
-        ) / order.totalPriceSet.presentmentMoney.amount
+        ) / order.suggestedRefund.shipping.amountSet.presentmentMoney.amount
 
-        expected_refund = returned_items_price * shipping_proportion
+        # $50 item1 + 5% of $10 shipping = $55 * shipping_proportion
+        expected_refund = (
+            returned_items_price + (0.5 * shipping_amount)
+        ) * shipping_proportion
 
         # Verify transaction proportionality
         assert len(calculation.transactions) == 1  # Single payment method

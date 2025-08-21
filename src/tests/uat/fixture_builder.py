@@ -230,6 +230,8 @@ class FixtureBuilder:
             shopMoney=total_refunded_shipping, presentmentMoney=total_refunded_shipping
         )
 
+        disputes = []
+
         return ShopifyOrder(
             id=self._order_data["id"],
             name=self._order_data["name"],
@@ -239,6 +241,7 @@ class FixtureBuilder:
             suggestedRefund=suggested_refund,
             refunds=refunds,
             returns=returns,
+            disputes=disputes,
             transactions=transactions,
             totalRefundedShippingSet=total_refunded_shipping_set,
         )

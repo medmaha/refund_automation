@@ -17,6 +17,9 @@ SHOPIFY_STORE_URL = os.getenv("SHOPIFY_STORE_URL")
 SHOPIFY_ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN")
 SHOPIFY_TIMEZONE = os.getenv("SHOPIFY_TIMEZONE", "UTC")
 
+REFUND_FULL_SHIPPING = os.getenv("REFUND_FULL_SHIPPING", "true").lower() == "true"
+REFUND_PARTIAL_SHIPPING = os.getenv("REFUND_PARTIAL_SHIPPING", "true").lower() == "true"
+
 # Slack Notifications
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")
 SLACK_CHANNEL = os.getenv("SLACK_CHANNEL", "#refund-automation")

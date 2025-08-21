@@ -111,10 +111,11 @@ class TestOrderLevelDiscountScenarios:
 class TestLineLevelDiscountScenarios:
     """Test B-D2: Line-level fixed discount → Correct per-line refund."""
 
+    @patch("src.shopify.refund.requests")
     @patch("src.shopify.refund.slack_notifier")
     @patch("src.shopify.refund.idempotency_manager")
     def test_b_d2_line_level_fixed_discount_correct_allocation(
-        self, mock_idempotency, mock_slack
+        self, mock_idempotency, mock_slack, mock_requests
     ):
         """B-D2: Line-level $10 discount should be correctly allocated per line."""
         # Setup
@@ -163,8 +164,17 @@ class TestLineLevelDiscountScenarios:
     def test_b_d2_line_level_discount_partial_refund_accuracy(self):
         """B-D2: Line-level discount should maintain accuracy in partial refunds."""
 
-        order = create_b_d2_order(full_refund=False)
+        item_1_price = 50.0
+        item_1_quantity = 2
+        _item_2_price = 70.0
+        _item_2_quantity = 1
+        item_1_discount_amount = 10.0
 
+        subtotal = ((item_1_price * item_1_quantity) - item_1_discount_amount) + (
+            _item_2_price * _item_2_quantity
+        )
+
+        order = create_b_d2_order(full_refund=False)
         tracking = create_delivered_tracking(tracking_number=order.tracking_number)
 
         # Test partial refund calculation
@@ -173,20 +183,17 @@ class TestLineLevelDiscountScenarios:
         # Verify partial refund calculation
         assert calculation.refund_type == "PARTIAL"
 
-        # TODO: fix the discount with refund_calculator
-        # Should refund only first item: ($50 - $10 discount) = $40 + proportional shipping
-        # line_item_amount = (50 - (0.1 * 100)) * 2
-        # proportional_shipping = (
-        #     line_item_amount / 170.00
-        # ) * calculation.discount_deduction or 1  # 50/170.0 * x shipping
+        returned_item_value = (item_1_price * item_1_quantity) - item_1_discount_amount
+        proportional_shipping = (
+            returned_item_value / subtotal
+        ) * calculation.shipping_refund
 
-        # expected_total = line_item_amount + proportional_shipping
-
-        # assert abs(calculation.total_refund_amount - expected_total) < 0.01
+        expected_total = returned_item_value + proportional_shipping
+        assert abs(calculation.total_refund_amount - expected_total) < 0.01
 
         # Verify only discounted item is included
-        # assert len(calculation.line_items_to_refund) == 1
-        # assert calculation.line_items_to_refund[0]["quantity"] == info.get("item_1_qty")
+        assert len(calculation.line_items_to_refund) == 1
+        assert calculation.line_items_to_refund[0]["quantity"] == item_1_quantity
 
 
 class TestVATInclusivePricingScenarios:
@@ -201,7 +208,7 @@ class TestVATInclusivePricingScenarios:
         """B-T1: VAT-inclusive pricing should correctly calculate tax portion in refund."""
         order, _ = create_b_t1_order(
             full_refund=True
-        )  # EUR currency, 2x€50 + 20% VAT = €120 + €10 shipping = €130 total
+        )  # EUR currency, 2x$50 + 20% VAT = $120 + $10 shipping = $130 total
         tracking = create_delivered_tracking(tracking_number=order.tracking_number)
 
         # Verify VAT structure
@@ -222,9 +229,9 @@ class TestVATInclusivePricingScenarios:
         # Verify full VAT refund
         assert calculation.refund_type == "FULL"
 
-        # Expected: €100 base + €15 VAT + €10 shipping = €125 total
+        # Expected: $100 base + $15 VAT + $10 shipping = $125 total
         expected_total = calculation.total_refund_amount
-        expected_tax = UATConstants.VAT_RATE * 100  # 15% of €100 = €15
+        expected_tax = UATConstants.VAT_RATE * 100  # 15% of $100 = $15
 
         # Verify tax refund is calculated
         assert calculation.tax_refund > 0
@@ -242,30 +249,46 @@ class TestVATInclusivePricingScenarios:
     def test_b_t1_vat_partial_refund_proportional_tax(self):
         """B-T1: VAT should be proportionally refunded in partial returns."""
 
-        order, _ = create_b_t1_order(full_refund=False)
+        # Set up test constants
+        vat_rate = 0.15  # 15% VAT rate
+        item_price = 50  # Price per item
+        shipping_amount = 10
+
+        # Calculate total order price: (2 items * price) + VAT + shipping
+        subtotal = item_price * 2  # 2 items at $50 each
+        vat_amount = subtotal * vat_rate  # VAT on subtotal
+        total_order_price = subtotal + vat_amount + shipping_amount
+
+        # Create test order and tracking
+        order, _ = create_b_t1_order(
+            full_refund=False,
+            vat_rate=vat_rate,
+            item_price=item_price,
+            shipping_amount=shipping_amount,
+        )
         tracking = create_delivered_tracking(tracking_number=order.tracking_number)
 
-        # Test partial refund calculation
+        # Calculate refund
         calculation = refund_calculator.calculate_refund(order, tracking)
 
-        # Verify partial refund with proportional VAT
+        # Verify partial refund calculation
         assert calculation.refund_type == "PARTIAL"
+        assert (
+            abs(order.totalPriceSet.presentmentMoney.amount - total_order_price) < 0.01
+        )
 
-        total_order_price = order.totalPriceSet.presentmentMoney.amount
+        # Calculate expected refund components
+        base_refund = item_price  # Refunding 1 item
+        proportional_vat = (base_refund / subtotal) * vat_amount
+        proportional_shipping = (base_refund / subtotal) * shipping_amount
 
-        # Should refund 1 item: €50 + proportional VAT + proportional shipping
-        item_price = 50.0
-        proportional_vat = (item_price / (item_price * 2)) * 15  # 50% of €15 VAT
-        proportional_shipping = (
-            item_price / total_order_price
-        ) * 10.0  # 50% of €10 shipping
-        expected_total = item_price + proportional_vat + proportional_shipping
+        expected_total = base_refund + proportional_vat + proportional_shipping
 
+        # Verify total refund amount
         assert abs(calculation.total_refund_amount - expected_total) < 0.01
 
-        # Verify partial tax refund
-        expected_tax_refund = proportional_vat
-        assert abs(calculation.tax_refund - expected_tax_refund) < 0.01
+        # Verify tax portion of refund
+        assert abs(calculation.tax_refund - proportional_vat) < 0.01
 
 
 class TestShippingPolicyScenarios:
@@ -411,7 +434,7 @@ class TestComplexCombinationScenarios:
             .with_shipping(12.0, refundable=True)
             .with_transaction(
                 UATConstants.SHOPIFY_PAYMENTS, TransactionKind.SALE
-            )  # €100 - €10 discount + €20 VAT - €8 shipping = €102
+            )  # $100 - $10 discount + $20 VAT - $8 shipping = $102
             .with_return_tracking()
             .with_return_line_item("gid://shopify/LineItem/0DKW923930H22", 2)
             .build()

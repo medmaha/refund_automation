@@ -15,6 +15,7 @@ from src.shopify.tracking import (
     generate_tracking_payload,
     register_orders_trackings,
 )
+from src.utils.audit import audit_logger
 from src.utils.slack import slack_notifier
 
 logger = get_logger(__name__)
@@ -22,11 +23,11 @@ logger = get_logger(__name__)
 REQUEST_PAGINATION_SIZE = 12
 MAX_SHOPIFY_ORDER_DATA = 10_000
 
-TRACKING_SEGMENT_SIZE = [
-    40  # Maximum trackings per API call
-]
+# Maximum trackings per API call
+TRACKING_SEGMENT_SIZE = [40]
 
 ELIGIBLE_ORDERS_QUERY = """
+name:1017
 financial_status:PAID OR
 financial_status:PARTIALLY_PAID OR
 financial_status:PARTIALLY_REFUNDED AND
@@ -38,42 +39,69 @@ financial_status:PARTIALLY_REFUNDED AND
 def __cleanup_shopify_orders(orders: list[ShopifyOrder]):
     logger.info(f"Cleaning up {len(orders)} Shopify orders")
 
-    cleaned_orders = []
     # Remove and get the last order from the list
-    order = orders.pop()
+    cleaned_orders = []
 
-    while True:
-        # Only keep orders that have at least one valid shipment
-        if order.valid_return_shipment:
-            cleaned_orders.append(order)
-            logger.debug(f"Order {getattr(order, 'id', None)} added to cleaned orders")
-        try:
-            # Pop the next order from the list
-            order = orders.pop()
-        except IndexError:
-            # Break out of the while loop if we run out of orders
-            break
-        except Exception as e:
-            logger.error(
-                "Unhandled error while cleaning orders", extra={"error": str(e)}
-            )
+    try:
+        order = orders.pop()
+        while True:
+            # Only keep orders that have at least one valid shipment
+            if order.valid_return_shipment:
+                cleaned_orders.append(order)
+                logger.debug(
+                    f"Order {getattr(order, 'id', None)} added to cleaned orders"
+                )
+            try:
+                # Pop the next order from the list
+                order = orders.pop()
+            except IndexError:
+                # Break out of the while loop if we run out of orders
+                break
+            except Exception as e:
+                logger.error(
+                    "Unhandled error while cleaning orders", extra={"error": str(e)}
+                )
 
-    logger.info(f"Cleaned orders count: {len(cleaned_orders)}")
-    return cleaned_orders
+        logger.info(f"Cleaned orders count: {len(cleaned_orders)}")
+        return cleaned_orders
+
+    except Exception as e:
+        logger.error("Unhandled error while cleaning orders", extra={"error": str(e)})
+        return cleaned_orders
 
 
 def __fetch_shopify_orders(endpoint: str, headers: dict, variables: dict):
     # Making the GraphQL request to Shopify
-
-    response = requests.post(
-        endpoint,
-        headers=headers,
-        json={"query": RETURN_ORDERS_QUERY, "variables": variables},
-        timeout=REQUEST_TIMEOUT,
-    )
-    response.raise_for_status()
-
-    return response.json()
+    try:
+        response = requests.post(
+            endpoint,
+            headers=headers,
+            timeout=REQUEST_TIMEOUT,
+            json={"query": RETURN_ORDERS_QUERY, "variables": variables},
+        )
+        response.raise_for_status()
+        audit_logger.log_api_interaction(
+            order_id="",
+            endpoint=endpoint,
+            request_type="graphql",
+            status_code=response.status_code,
+            request_id=f"fetch_shopify_orders_{time.time()}",
+            response_time_ms=response.elapsed.total_seconds() * 1000,
+            error="",
+        )
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        logger.error("Unhandled error while fetching orders", extra={"error": str(e)})
+        audit_logger.log_api_interaction(
+            order_id="",
+            endpoint=endpoint,
+            request_type="graphql",
+            status_code=400,
+            request_id="fetch_shopify_orders",
+            response_time_ms=0,
+            error=str(e),
+        )
+        raise e
 
 
 def __fetch_all_shopify_orders():
@@ -121,7 +149,6 @@ def __fetch_all_shopify_orders():
             )
 
             errors = data.get("errors")
-
             if errors:
                 logger.error(f"Shopify API errors: {errors}")
                 slack_notifier.send_error(
@@ -132,10 +159,8 @@ def __fetch_all_shopify_orders():
                         "api_requests_vars": variables,
                     },
                 )
-
-                # Break out of this loop for early return
+                # Break out of the while loop and return early
                 break
-
             else:
                 # Extract and validate response data
                 orders_data = data.get("data", {}).get("orders", {})

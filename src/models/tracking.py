@@ -67,3 +67,7 @@ class TrackingData(BaseModel):
 
     def __repr__(self):
         return f"TrackingData(number={self.number}, carrier={self.carrier})"
+
+    @property
+    def is_carrier_disagreement(self):
+        return bool(self.tag) and ("carrier_mismatch" in self.tag)

@@ -1,9 +1,9 @@
-
 from decimal import ROUND_DOWN, Decimal
 from typing import Dict, List, Literal, Union
 
 from pydantic import BaseModel
 
+from src.config import REFUND_FULL_SHIPPING, REFUND_PARTIAL_SHIPPING
 from src.logger import get_logger
 from src.models.order import LineItem, ReturnLineItem, ShopifyOrder
 from src.models.tracking import TrackingData
@@ -161,12 +161,14 @@ class RefundCalculator:
         transactions = self._prepare_refund_transactions(order)
 
         # Calculate shipping and tax refunds
-        shipping_refund = (
-            order.suggestedRefund.shipping.amountSet.presentmentMoney.amount
-        )
+        if not REFUND_FULL_SHIPPING:
+            shipping_refund = Decimal("0")
+        else:
+            shipping_refund = (
+                order.suggestedRefund.shipping.amountSet.presentmentMoney.amount
+            )
 
         tax_refund = self._calculate_full_total_tax_refund(order.lineItems)
-
         return RefundCalculationResult(
             refund_type="FULL",
             total_refund_amount=self.__normalize_amount(total_refund_amount),
@@ -288,6 +290,9 @@ class RefundCalculator:
     ):
         """Calculate proportional shipping refund based on returned items."""
 
+        if not REFUND_PARTIAL_SHIPPING:
+            return Decimal("0")
+
         if not returned_line_item_entries:
             self.logger.debug("No returned line items for shipping calculation")
             return Decimal("0")
@@ -297,7 +302,6 @@ class RefundCalculator:
         )
 
         if original_shipping <= 0:
-            # TODO: this is not the only way to find out refundable shipping
             self.logger.debug(
                 f"No refundable shipping for order {order.name}: {original_shipping}"
             )
@@ -420,7 +424,7 @@ class RefundCalculator:
                 self.logger.debug(
                     f"Line item {order_line_item.id}: net_unit_value={net_value_per_unit}, "
                     f"returned_qty={returned_quantity}, line_returned_value={line_returned_value}"
-                ) 
+                )
 
             except (ValueError, TypeError, ZeroDivisionError) as e:
                 self.logger.error(
@@ -600,6 +604,13 @@ class RefundCalculator:
         proportion = refund_amount_decimal / original_amount
 
         transactions = []
+        # original_shipping = Decimal(
+        #     str(order.suggestedRefund.shipping.amountSet.presentmentMoney.amount)
+        # )
+
+        # if not REFUND_FULL_SHIPPING:
+        #     original_shipping = Decimal(str("0"))
+
         for suggested_transaction in order.suggestedRefund.suggestedTransactions:
             original_transaction_amount = Decimal(
                 str(suggested_transaction.amountSet.presentmentMoney.amount)
@@ -612,9 +623,7 @@ class RefundCalculator:
                 "parentId": suggested_transaction.parentTransaction.id,
                 "kind": "REFUND",
                 "gateway": suggested_transaction.gateway,
-                "amount": self.__normalize_amount(
-                    proportional_amount
-                ),
+                "amount": self.__normalize_amount(proportional_amount),
             }
             transactions.append(transaction_data)
 
@@ -623,20 +632,28 @@ class RefundCalculator:
     def _prepare_refund_transactions(self, order: ShopifyOrder) -> List[Dict]:
         """Prepare transaction data for full refund ."""
 
-        transactions = []
-
         if not order.suggestedRefund.suggestedTransactions:
-            return transactions
+            return []
+
+        transactions = []
+        original_shipping = Decimal(
+            str(order.suggestedRefund.shipping.amountSet.presentmentMoney.amount)
+        )
 
         for transaction in order.suggestedRefund.suggestedTransactions:
+            original_transaction_amount = Decimal(
+                str(transaction.amountSet.presentmentMoney.amount)
+            )
+
+            if not REFUND_FULL_SHIPPING:
+                original_transaction_amount -= original_shipping
+
             data = {
                 "orderId": order.id,
                 "parentId": transaction.parentTransaction.id,
                 "kind": "REFUND",
                 "gateway": transaction.gateway,
-                "amount": self.__normalize_amount(
-                    transaction.amountSet.presentmentMoney.amount
-                ),
+                "amount": self.__normalize_amount(original_transaction_amount),
             }
             transactions.append(data)
 

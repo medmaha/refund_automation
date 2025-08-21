@@ -248,27 +248,18 @@ class TestCarrierSystemDisagreementScenarios:
     """Test B-Tr3: Carrier systems disagree → Hold; Slack with details."""
 
     @patch("src.shopify.refund.sys")
+    @patch("src.shopify.refund.requests")
     @patch("src.shopify.refund.slack_notifier")
-    @patch("src.shopify.refund.idempotency_manager")
+    @patch("src.shopify.refund.idempotency_manager._save_cache")
     def test_b_tr3_carrier_systems_disagree_hold_with_slack_details(
-        self, mock_idempotency, mock_slack, mock_sys
+        self, mock_idempotency_save, mock_slack, mock_requests, mock_sys
     ):
         """B-Tr3: Carrier system disagreement should hold processing and alert with details."""
-        # Setup
-        mock_idempotency.check_operation_idempotency.return_value = (
-            "test_key_btr3",
-            False,
-        )
 
         order, _ = create_b_h1_order()
-        tracking = create_carrier_mismatch_tracking()
-
-        # Verify tracking has carrier disagreement data
-        assert tracking.carrier_disagreement
-
-        assert tracking.carrier_disagreement["mismatch"] is True
-        assert tracking.carrier_disagreement["primary_says"] == TrackingStatus.DELIVERED
-        assert tracking.carrier_disagreement["secondary_says"] == "in_transit"
+        tracking = create_carrier_mismatch_tracking(
+            tracking_number=order.tracking_number
+        )
 
         # Process refund automation with carrier mismatch
         with patch(
@@ -278,46 +269,44 @@ class TestCarrierSystemDisagreementScenarios:
 
             process_refund_automation()
 
-            # # Verify Slack was notified with detailed carrier mismatch information
-            # error_calls = mock_slack.send_error.call_args_list
-            # warning_calls = mock_slack.send_warning.call_args_list
+            # Verify Slack was notified with detailed carrier mismatch information
+            error_calls = mock_slack.send_error.call_args_list
+            warning_calls = mock_slack.send_warning.call_args_list
 
-            # # Should have alert about carrier disagreement
-            # carrier_mismatch_alerts = [
-            #     call
-            #     for call in (error_calls + warning_calls)
-            #     if any(
-            #         keyword in str(call).lower()
-            #         for keyword in ["disagree", "mismatch", "carrier"]
-            #     )
-            # ]
+            # Should have alert about carrier disagreement
+            carrier_mismatch_alerts = [
+                call
+                for call in (error_calls + warning_calls)
+                if any(
+                    keyword in str(call).lower()
+                    for keyword in ["disagree", "mismatch", "carrier"]
+                )
+            ]
 
-            # # TODO: implement carrier mismatch
-            # assert (
-            #     len(carrier_mismatch_alerts) > 0
-            # ), "Should alert about carrier system disagreement"
+            assert len(carrier_mismatch_alerts) > 0, (
+                "Should alert about carrier system disagreement"
+            )
 
-            # # Check that alert includes detailed information
-            # alert_content = str(carrier_mismatch_alerts[0])
-            # assert (
-            #     "primary" in alert_content.lower()
-            #     or "secondary" in alert_content.lower()
-            # )
+            # Check that alert includes detailed information
+            alert_content = str(carrier_mismatch_alerts[0])
+
+            # Check that alert includes both order name and tracking number
+            assert order.id in alert_content, "Alert should contain order name"
+            assert order.name in alert_content, "Alert should contain order name"
+            assert tracking.number in alert_content, (
+                "Alert should contain tracking number"
+            )
 
     @patch("src.shopify.refund.sys")
+    @patch("src.shopify.refund.requests")
     @patch("src.shopify.refund.slack_notifier")
-    @patch("src.shopify.refund.idempotency_manager")
+    @patch("src.shopify.refund.idempotency_manager._save_cache")
     def test_b_tr3_carrier_disagreement_holds_processing(
-        self, mock_idempotency, mock_slack, mock_sys
+        self, mock_idempotency_save, mock_slack, mock_requests, mock_sys
     ):
         """B-Tr3: Carrier disagreement should hold refund processing."""
-        # Setup
-        mock_idempotency.check_operation_idempotency.return_value = (
-            "test_key_btr3_hold",
-            False,
-        )
 
-        order, info = create_b_h1_order()
+        order, _ = create_b_h1_order()
         tracking = create_carrier_mismatch_tracking()
 
         # Attempt to process refund directly
@@ -351,19 +340,15 @@ class TestCarrierSystemDisagreementScenarios:
             assert total_alerts > 0, "Should send alerts about carrier disagreement"
 
     @patch("src.shopify.refund.sys")
+    @patch("src.shopify.refund.requests")
     @patch("src.shopify.refund.slack_notifier")
-    @patch("src.shopify.refund.idempotency_manager")
+    @patch("src.shopify.refund.idempotency_manager._save_cache")
     def test_b_tr3_multiple_carrier_source_validation(
-        self, mock_idempotency, mock_slack, mock_sys
+        self, mock_idempotency_save, mock_slack, mock_requests, mock_sys
     ):
         """B-Tr3: Test validation when multiple carrier sources provide conflicting data."""
-        # Setup
-        mock_idempotency.check_operation_idempotency.return_value = (
-            "test_key_btr3_multi",
-            False,
-        )
 
-        order, info = create_b_h1_order()
+        order, _ = create_b_h1_order()
 
         # Create tracking with multiple conflicting sources
         tracking = (
@@ -419,19 +404,15 @@ class TestNoTrackingNumberScenarios:
     """Test B-Tr4: No tracking number → Not eligible; Slack."""
 
     @patch("src.shopify.refund.sys")
+    @patch("src.shopify.refund.requests")
     @patch("src.shopify.refund.slack_notifier")
-    @patch("src.shopify.refund.idempotency_manager")
+    @patch("src.shopify.refund.idempotency_manager._save_cache")
     def test_b_tr4_no_tracking_number_not_eligible_slack_alert(
-        self, mock_idempotency, mock_slack, mock_sys
+        self, mock_idempotency_save, mock_slack, mock_requests, mock_sys
     ):
         """B-Tr4: No tracking number should not be eligible and trigger Slack alert."""
-        # Setup
-        mock_idempotency.check_operation_idempotency.return_value = (
-            "test_key_btr4",
-            False,
-        )
 
-        order, info = create_b_h1_order()
+        order, _ = create_b_h1_order()
         tracking = create_no_tracking()
 
         # Verify tracking has no tracking number
@@ -464,19 +445,14 @@ class TestNoTrackingNumberScenarios:
             )
 
     @patch("src.shopify.refund.sys")
+    @patch("src.shopify.refund.requests")
     @patch("src.shopify.refund.slack_notifier")
-    @patch("src.shopify.refund.idempotency_manager")
+    @patch("src.shopify.refund.idempotency_manager._save_cache")
     def test_b_tr4_empty_tracking_number_handling(
-        self, mock_idempotency, mock_slack, mock_sys
+        self, mock_idempotency_save, mock_slack, mock_requests, mock_sys
     ):
         """B-Tr4: Test handling of empty/invalid tracking numbers."""
-        # Setup
-        mock_idempotency.check_operation_idempotency.return_value = (
-            "test_key_btr4_empty",
-            False,
-        )
-
-        order, info = create_b_h1_order()
+        order, _ = create_b_h1_order()
 
         # Test various invalid tracking number scenarios
         invalid_tracking_scenarios = [

@@ -71,11 +71,6 @@ def generate_tracking_payload(orders: list[ShopifyOrder]):
 def register_orders_trackings(payload: list[dict]):
     """Register tracking numbers with the tracking API using retry logic and better error handling."""
 
-    # idempotent_payloads = []
-
-    # TODO: Check the idempotency of the registering items
-    # To reduce unnecessary network bandwidth
-
     if not payload:
         return
 

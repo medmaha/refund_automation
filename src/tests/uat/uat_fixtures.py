@@ -271,7 +271,7 @@ class UATFixtureBuilder(FixtureBuilder):
 
     def with_refund_force_now_tag(self):
         """Add tag to force immediate refund."""
-        return self.with_tags("refund:force:now")
+        return self.with_tags("refund:force:now", "refund:auto:now")
 
 
 class UATTrackingBuilder:
@@ -324,12 +324,9 @@ class UATTrackingBuilder:
 
     def with_carrier_mismatch(self):
         """Set up carrier system disagreement."""
-        self.carrier_disagreement = {
-            **(self.carrier_disagreement or {}),
-            "primary_says": TrackingStatus.DELIVERED,
-            "secondary_says": "in_transit",
-            "mismatch": True,
-        }
+
+        self.tag = self.tag or ""
+        self.tag += ":carrier_mismatch"
         return self
 
     def with_no_tracking(self):
@@ -588,17 +585,22 @@ def create_b_d2_order(
     return fx
 
 
-def create_b_t1_order(full_refund=False):
+def create_b_t1_order(
+    full_refund=False,
+    vat_rate=UATConstants.VAT_RATE,
+    shipping_amount=10,
+    item_price=50.0,
+):
     """B-T1: VAT-inclusive pricing."""
 
     fx = UATFixtureBuilder()
     fx = (
         fx.with_id_and_name("gid://shopify/Order/BT1001", "BT1-VAT-001")
         .with_currency(UATConstants.EUR)
-        .with_line_item(quantity=1, price=50)
-        .with_line_item(quantity=1, price=50)
-        .with_vat()
-        .with_shipping(10)
+        .with_line_item(quantity=1, price=item_price)
+        .with_line_item(quantity=1, price=item_price)
+        .with_vat(rate=vat_rate)
+        .with_shipping(shipping_amount)
         .with_return_tracking()
         .with_return_line_item(fx._order_data["line_items"][0]["id"], refundable_qty=1)
         .with_transaction(UATConstants.SHOPIFY_PAYMENTS, TransactionKind.SALE)
@@ -635,9 +637,10 @@ def create_b_s2_order(shipping_amount=15.0) -> ShopifyOrder:
     """B-S2: Shipping refundable per policy OFF."""
     return (
         UATFixtureBuilder()
-        .with_line_item(quantity=2, price=50.0)
+        .with_line_item(f"gid://shopify/LineItem/9QP920I029W8", quantity=2, price=50.0)
         .with_shipping(shipping_amount, refundable=False)
         .with_return_tracking()
+        .with_return_line_item(f"gid://shopify/LineItem/9QP920I029W8", refundable_qty=2)
         .with_transaction(UATConstants.SHOPIFY_PAYMENTS, TransactionKind.SALE)
         .build()
     )
@@ -762,6 +765,7 @@ def create_early_delivery_tracking(tracking_number=None):
     """Create tracking for package delivered too early."""
     return (
         UATTrackingBuilder(tracking_number=tracking_number)
+        .with_delivered_at(days=2)
         .with_early_delivery(hours_ago=100)
         .build()
     )
@@ -781,6 +785,7 @@ def create_carrier_mismatch_tracking(tracking_number=None):
     return (
         UATTrackingBuilder(tracking_number=tracking_number)
         .with_carrier_mismatch()
+        .with_delivered_at(days=6)
         .build()
     )
 

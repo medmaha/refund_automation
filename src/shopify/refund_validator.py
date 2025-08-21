@@ -99,15 +99,30 @@ def validate_order_before_refund(
 
         # Retrieve the latests status information from the tracking data
         latest_status = tracking.track_info.latest_status
-        tracking_status = latest_status.status.value if latest_status else None
-        tracking_sub_status = latest_status.sub_status.value if latest_status else None
+        tracking_status: str = latest_status.status.value if latest_status else ""
+        tracking_sub_status: str = latest_status.sub_status.value if latest_status else ""
 
+        allowed_sub_statuses = [
+            None,
+            TrackingSubStatus.DELIVERED_OTHER.value.lower(),
+            TrackingSubStatus.DELIVERED_SIGNED.value.lower(),
+            TrackingSubStatus.DELIVERED_AT_LOCKER.value.lower(),
+        ]
+
+        # Block refund if any of these conditions are met
         if (
-            tracking_status != TrackingStatus.DELIVERED.value
-            or tracking_sub_status != TrackingSubStatus.DELIVERED_OTHER.value
+            not (tracking_status.lower() == TrackingStatus.DELIVERED.value.lower())
+            or
+            not (
+                (tracking_sub_status is None)
+                or
+                (tracking_sub_status and not tracking_sub_status.startswith("DELIVERED_"))
+                or
+                (tracking_sub_status and not tracking_sub_status.lower() in allowed_sub_statuses)
+            )
         ):
             return log_invalid_tracking_status(
-                order, currency, tracking_status, tracking_sub_status, slack_notifier
+                order, tracking_number, currency, tracking_status, tracking_sub_status, slack_notifier
             )
 
         is_eligible, timing_details = validate_refund_timing(tracking)

@@ -65,9 +65,6 @@ query ($first: Int, $after: String, $query: String) {
           amountSet {
             presentmentMoney {
               amount
-            }
-            shopMoney {
-              amount
               currencyCode
             }
           }

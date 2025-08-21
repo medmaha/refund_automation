@@ -6,20 +6,15 @@ from pydantic import BaseModel, Field
 
 class TrackingStatus(Enum):
     NOTFOUND = "NotFound"
-    InfoReceived = "InfoReceived"
     IN_TRANSIT = "InTransit"
-    Expired = "Expired"
-    AvailableForPickup = "AvailableForPickup"
-    OutForDelivery = "OutForDelivery"
-    DeliveryFailure = "DeliveryFailure"
     DELIVERED = "Delivered"
-    Exception = "Exception"
-
 
 class TrackingSubStatus(Enum):
     IN_TRANSIT_OTHER = "InTransit"
     NOTFOUND_OTHER = "NotFound_Other"
     DELIVERED_OTHER = "Delivered_Other"
+    DELIVERED_SIGNED = "Delivered_Signed"
+    DELIVERED_AT_LOCKER = "Delivered_at_locked"
     EXCEPTION_RETURNED = (
         "Exception_Returned"  # Sender has successfully received the returned package.
     )
@@ -30,7 +25,7 @@ class TrackingSubStatus(Enum):
 
 class LatestStatus(BaseModel):
     status: Optional[TrackingStatus]
-    sub_status: Optional[TrackingSubStatus]
+    sub_status: Optional[TrackingSubStatus] = Field(default=None)
     sub_status_descr: Optional[str] = Field(default="")
 
 

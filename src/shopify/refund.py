@@ -195,7 +195,7 @@ def refund_order(
 
     # Extract basic order information
     order_amount = order.totalPriceSet.presentmentMoney.amount
-    currency = order.totalPriceSet.presentmentMoney.currencyCode or "USD"
+    currency = order.totalPriceSet.presentmentMoney.currencyCode
     tracking_number = tracking.number if tracking else None
 
     logger.info(
@@ -308,7 +308,12 @@ def refund_order(
         # Prepare GraphQL variables with calculated data
         shipping = {}
         if refund_calculation.shipping_refund:
-            shipping.update({"amount": refund_calculation.shipping_refund})
+            shipping.update(
+                {
+                    "amount": refund_calculation.shipping_refund,
+                    # "currencyCode": currency,
+                }
+            )
 
         refund_note = f"{refund_calculation.refund_type.capitalize()} refund - Total: ${refund_calculation.total_refund_amount}"
         variables = {

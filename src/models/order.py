@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 class MoneyBag(BaseModel):
     amount: float
-    currencyCode: Optional[str] = Field(default=None)
+    currencyCode: str 
 
 
 class MoneyBagSet(BaseModel):

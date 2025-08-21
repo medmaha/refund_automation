@@ -11,7 +11,8 @@ from src.models.order import ShopifyOrder
 from src.models.tracking import TrackingData, TrackingStatus, TrackingSubStatus
 from src.utils.slack import slack_notifier
 
-TRACKING_SEGMENT_SIZE = 40  # Maximum trackings per API call
+# Maximum trackings per API call
+TRACKING_SEGMENT_SIZE = 40
 
 logger = get_logger(__name__)
 

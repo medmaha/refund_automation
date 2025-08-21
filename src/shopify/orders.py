@@ -23,11 +23,7 @@ logger = get_logger(__name__)
 REQUEST_PAGINATION_SIZE = 12
 MAX_SHOPIFY_ORDER_DATA = 10_000
 
-# Maximum trackings per API call
-TRACKING_SEGMENT_SIZE = [40]
-
 ELIGIBLE_ORDERS_QUERY = """
-name:1017
 financial_status:PAID OR
 financial_status:PARTIALLY_PAID OR
 financial_status:PARTIALLY_REFUNDED AND

@@ -36,15 +36,15 @@ class SlackNotifier:
 
         # Color coding based on level
         colors = {
-            "info": "#36a64f",  # Green
+            "info": "##808080",  # Gray
             "warning": "#ff9500",  # Orange
             "error": "#ff0000",  # Red
             "success": "#36a64f",  # Green
         }
 
         attachment = {
-            "color": colors.get(level, "#808080"),
-            "title": f"Refund Automation Alert ({self.automation_id}) {mode_indicator}",
+            "color": colors.get(level, colors["info"]),
+            "title": f"Automation Alert ({self.automation_id})",
             "text": message,
             "timestamp": timestamp,
             "fields": [],
@@ -132,14 +132,16 @@ class SlackNotifier:
         self,
         successful_refunds: int,
         failed_refunds: int,
+        skipped_refunds: int,
         total_amount: float,
         currency: str,
     ):
         """Send a summary of refund processing."""
-        message = f"Refund processing completed: {successful_refunds} successful, {failed_refunds} failed"
+        message = f"Refund processing completed:"
         details = {
             "Successful Refunds": successful_refunds,
             "Failed Refunds": failed_refunds,
+            "Skipped Refunds": skipped_refunds,
             "Total Refunded": (
                 f"{total_amount:.2f} {currency}" if successful_refunds > 0 else "0"
             ),

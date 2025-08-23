@@ -176,6 +176,7 @@ def process_refund_automation():
     slack_notifier.send_refund_summary(
         successful_refunds=successful_refunds,
         failed_refunds=failed_refunds,
+        skipped_refunds=skipped_refunds,
         total_amount=total_refunded_amount,
         currency=currency,
     )
@@ -242,11 +243,11 @@ def refund_order(
             slack_notifier.send_warning(
                 f"Duplicate refund operation detected for order {order.name} - skipping",
                 details={
-                    "order_id": order.id,
-                    "order_name": order.name,
-                    "idempotency_key": idempotency_key,
-                    "decision_branch": "duplicate_skipped",
-                    "investigate": "Verify that the order is actually refunded",
+                    "Order ID": order.id,
+                    "Order Name": order.name,
+                    "Idempotency Key": idempotency_key,
+                    "Decision Branch": "Duplicate_skipped",
+                    "Investigate": "Verify that the order is actually refunded",
                 },
             )
             return None
@@ -307,15 +308,16 @@ def refund_order(
 
         # Prepare GraphQL variables with calculated data
         shipping = {}
-        if refund_calculation.shipping_refund:
-            shipping.update(
-                {
-                    "amount": refund_calculation.shipping_refund,
-                    # "currencyCode": currency,
-                }
-            )
+        if refund_calculation.refund_type == "FULL":
+            shipping.update({
+                "fullRefund": True,
+            })
+        elif refund_calculation.shipping_refund:
+            shipping.update({
+                "amount": refund_calculation.shipping_refund,
+            })
 
-        refund_note = f"{refund_calculation.refund_type.capitalize()} refund - Total: ${refund_calculation.total_refund_amount}"
+        refund_note = f"{refund_calculation.refund_type.capitalize()} refund - Total: {currency} {refund_calculation.total_refund_amount}"
         variables = {
             "input": {
                 "notify": True,
@@ -324,6 +326,7 @@ def refund_order(
                 "shipping": shipping,
                 "transactions": refund_calculation.transactions,
                 "refundLineItems": refund_calculation.line_items_to_refund,
+                "currency": currency,
             }
         }
 

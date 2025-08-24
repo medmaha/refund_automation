@@ -1,3 +1,6 @@
+import os
+import time
+
 import requests
 
 from src.config import (
@@ -13,22 +16,9 @@ from src.utils.slack import slack_notifier
 
 # Maximum trackings per API call
 TRACKING_SEGMENT_SIZE = 40
+TRACKING_AWAIT_TIMEOUT = int(os.getenv("TRACKING_AWAIT_TIMEOUT", "5"))
 
 logger = get_logger(__name__)
-
-
-def get_order_by_tracking_id(tracking_number: str, orders: list[ShopifyOrder]):
-    """
-    Optimized function to find an order by tracking number.
-    This version returns None if no matching order is found, which is good practice.
-    """
-
-    for order in orders:
-        if order.tracking_number == tracking_number:
-            return order
-
-    logger.debug(f"No order found for tracking number: {tracking_number}")
-    return None
 
 
 def generate_tracking_payload(orders: list[ShopifyOrder]):
@@ -43,9 +33,9 @@ def generate_tracking_payload(orders: list[ShopifyOrder]):
     try:
         for order in orders:
             carrier_code = None
-            for _return in order.returns:
-                if _return.status == "OPEN":
-                    for rfo in _return.reverseFulfillmentOrders:
+            for reverse_fulfillment in order.returns:
+                if reverse_fulfillment.status == "OPEN":
+                    for rfo in reverse_fulfillment.reverseFulfillmentOrders:
                         for rd in rfo.reverseDeliveries:
                             # Only if we have the tracking number
                             if rd.deliverable.tracking.number:
@@ -171,9 +161,13 @@ def register_orders_trackings(payload: list[dict]):
     logger.info(
         f"Total tracking registration results: {total_registered} registered, {total_rejected} rejected"
     )
+    logger.info(
+        f"Waiting {TRACKING_AWAIT_TIMEOUT} seconds for tracking registration to sync"
+    )
+    time.sleep(TRACKING_AWAIT_TIMEOUT)
 
 
-def fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
+def fetch_tracking_details(payload: list):
     """
     Fetch tracking details for the given payload and match them with Shopify orders.
     """
@@ -240,7 +234,7 @@ def fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
     logger.info(f"Received {len(trackings)} tracking entries from API")
 
     # List to hold tuples of (ShopifyOrder, TrackingData) for matched and valid trackings
-    order_and_trackings = []
+    cleaned_trackings = []
 
     parsing_errors = 0
     processed_count = 0
@@ -258,23 +252,8 @@ def fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
 
             _tracking = TrackingData(**tracking_data)
 
-            # Find the corresponding Shopify order by tracking number
-            corresponding_order = get_order_by_tracking_id(_tracking.number, orders)
-
-            # Skip if either tracking-info or corresponding-order is missing
-            if not (_tracking.track_info and corresponding_order):
-                unmatched_tracking_numbers.append((_tracking.number, "N/A"))
-                logger.debug(
-                    f"Skipping tracking number: {_tracking.number} (missing tracking info)",
-                    extra={
-                        "has_track_info": _tracking.track_info is not None,
-                        "has_associated_order": corresponding_order is not None,
-                    },
-                )
-                continue
-
-            # Extract tracking status and sub-status with validation
             try:
+                # Extract tracking status and sub-status with validation
                 tracking_status = _tracking.track_info.latest_status.status.value
                 tracking_sub_status = (
                     _tracking.track_info.latest_status.sub_status.value
@@ -286,20 +265,11 @@ def fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
                 )
                 continue
 
-            # Only add to result if
-            # status and sub-status match the return criteria
-            if (
-                tracking_status == TrackingStatus.DELIVERED.value
-                and tracking_sub_status == TrackingSubStatus.DELIVERED_OTHER.value
-            ):
-                order_and_trackings.append((corresponding_order, _tracking))
-                matched_tracking_numbers.append(
-                    (_tracking.number, corresponding_order.name)
-                )
+            if _tracking.carrier and _tracking.number and _tracking.track_info:
+                cleaned_trackings.append(_tracking)
+                matched_tracking_numbers.append(_tracking.number)
             else:
-                unmatched_tracking_numbers.append(
-                    (_tracking.number, corresponding_order.name)
-                )
+                unmatched_tracking_numbers.append(_tracking.number)
                 logger.debug(
                     f"Tracking number {_tracking.number} does not match return criteria",
                     extra={
@@ -325,9 +295,9 @@ def fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
                 extra={
                     "tracking_number": tracking_data.get("number", "unknown"),
                     "error": str(e),
+                    "error_type": type(e),
                 },
             )
-
         except Exception as e:
             # Any other parsing error
             parsing_errors += 1
@@ -335,6 +305,7 @@ def fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
                 f"Parsing error for tracking data: {e}",
                 extra={
                     "tracking_number": tracking_data.get("number", "unknown"),
+                    "error_type": type(e),
                     "error": str(e),
                     "tracking_data_keys": (
                         list(tracking_data.keys())
@@ -346,21 +317,17 @@ def fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
             )
 
     if matched_tracking_numbers:
-        logger.info(
-            "These tracking-numbers matches return criteria",
-            extra={
-                "status": TrackingStatus.DELIVERED.value,
-                "sub_status": TrackingSubStatus.DELIVERED_OTHER.value,
-                "payload": matched_tracking_numbers,
-            },
-        )
         slack_payload = {
             f"{item[1]}": f"Tracking({item[0]})" for item in matched_tracking_numbers
         }
+        logger.info(
+            "These tracking-numbers matches return criteria",
+            extra=slack_payload,
+        )
         slack_payload.update(
             {
-                "status": TrackingStatus.DELIVERED.value,
-                "sub_status": TrackingSubStatus.DELIVERED_OTHER.value,
+                "status": TrackingStatus.Delivered.value,
+                "sub_status": TrackingSubStatus.Delivered_Other.value,
             }
         )
         slack_notifier.send_info(
@@ -381,9 +348,9 @@ def fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
 
     # Log summary statistics
     logger.info(
-        f"Tracking details processing complete: {len(order_and_trackings)} matched, {parsing_errors} errors out of {processed_count} total",
+        f"Tracking details processing complete: {len(cleaned_trackings)} matched, {parsing_errors} errors out of {processed_count} total",
         extra={
-            "matched_orders": len(order_and_trackings),
+            "matched_orders": len(cleaned_trackings),
             "parsing_errors": parsing_errors,
             "processed_count": processed_count,
             "success_rate": (
@@ -398,10 +365,10 @@ def fetch_tracking_details(payload: list, orders: list[ShopifyOrder]):
         slack_notifier.send_warning(
             f"Tracking parsing completed with {parsing_errors} errors",
             details={
-                "matched": len(order_and_trackings),
+                "matched": len(cleaned_trackings),
                 "errors": parsing_errors,
                 "total": processed_count,
             },
         )
 
-    return order_and_trackings
+    return cleaned_trackings

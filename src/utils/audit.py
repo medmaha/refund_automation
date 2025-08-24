@@ -156,12 +156,6 @@ class AuditLogger:
 
         self._write_audit_entry(entry)
 
-        if error:
-            logger.error(
-                f"API {request_type} to {endpoint} - Status: {status_code or 'N/A'}",
-                extra=entry,
-            )
-
     def log_refund_decision(
         self,
         order_id: str,

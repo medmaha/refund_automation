@@ -6,30 +6,12 @@ from pydantic import BaseModel, Field
 
 class MoneyBag(BaseModel):
     amount: float
-    currencyCode: str 
+    currencyCode: str
 
 
 class MoneyBagSet(BaseModel):
     presentmentMoney: MoneyBag
     shopMoney: Optional[MoneyBag] = Field(default=None)
-
-
-class DeliverableTracking(BaseModel):
-    url: Optional[str] = Field(default=None)
-    number: Optional[str] = Field(default=None)
-    carrierName: Optional[str] = Field(default=None)
-
-
-class Deliverable(BaseModel):
-    tracking: DeliverableTracking
-
-
-class ReverseDeliveries(BaseModel):
-    deliverable: Deliverable
-
-
-class ReverseFulfillmentOrder(BaseModel):
-    reverseDeliveries: List[ReverseDeliveries]
 
 
 class DiscountAllocation(BaseModel):
@@ -62,12 +44,37 @@ class ReturnLineItem(BaseModel):
     fulfillmentLineItem: FulfillmentLineItem
 
 
-class ReturnFulfillments(BaseModel):
+class DeliverableTracking(BaseModel):
+    url: Optional[str] = Field(default=None)
+    number: Optional[str] = Field(default=None)
+    carrierName: Optional[str] = Field(default=None)
+
+
+class Deliverable(BaseModel):
+    tracking: DeliverableTracking
+
+
+class ReverseDeliveries(BaseModel):
+    deliverable: Deliverable
+
+
+class ReverseFulfillmentOrder(BaseModel):
+    reverseDeliveries: List[ReverseDeliveries]
+
+
+class ReverseFulfillment(BaseModel):
     id: str
     name: str
     status: Optional[str] = Field(default=None)
     returnLineItems: List[ReturnLineItem] = Field(default_factory=list)
     reverseFulfillmentOrders: List[ReverseFulfillmentOrder]
+
+    @property
+    def tracking_number(self):
+        for rfo in self.reverseFulfillmentOrders:
+            for rd in rfo.reverseDeliveries:
+                if rd.deliverable.tracking.number:
+                    return rd.deliverable.tracking.number
 
 
 class RefundCreateResponse(BaseModel):
@@ -78,13 +85,14 @@ class RefundCreateResponse(BaseModel):
     totalRefundedSet: MoneyBagSet
 
 
-class TransactionKind(Enum):
+class TransactionKind(str, Enum):
     VOID = "VOID"
     SALE = "SALE"
     REFUND = "REFUND"
     CAPTURE = "CAPTURE"
     CHANGE = "CHANGE"
     SUGGESTED_REFUND = "SUGGESTED_REFUND"
+    _UNKNOWN = "UNKNOWN"
 
 
 class OrderTransaction(BaseModel):
@@ -93,6 +101,9 @@ class OrderTransaction(BaseModel):
     kind: TransactionKind
     amountSet: MoneyBagSet
     orderId: Optional[str] = Field(default=None)
+
+    def __missing__(self, v):
+        return TransactionKind._UNKNOWN  # Fallback to default
 
 
 class SuggestedRefundRefundShipping(BaseModel):
@@ -153,11 +164,12 @@ class ShopifyOrder(BaseModel):
     tags: List[str]
     lineItems: List[LineItem]
     totalPriceSet: MoneyBagSet
+    totalShippingPriceSet: MoneyBagSet
     totalRefundedShippingSet: MoneyBagSet
     discountApplications: List[dict] = Field(default_factory=list)
     suggestedRefund: SuggestedRefund
     refunds: List[OrderRefunds]
-    returns: List[ReturnFulfillments]
+    returns: List[ReverseFulfillment]
     disputes: List[OrderDispute]
     transactions: List[OrderTransaction]
 
@@ -165,7 +177,7 @@ class ShopifyOrder(BaseModel):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.__filter_out_already_refunded_return_line_items()
+        # self.__filter_out_already_refunded_return_line_items()
 
     def __str__(self):
         return (
@@ -177,16 +189,8 @@ class ShopifyOrder(BaseModel):
 
     @property
     def tracking_number(self):
-        return self.get_tracking_number()
-
-    def get_tracking_number(self):
-        for _return in self.returns:
-            if _return.status == "OPEN":
-                for rfo in _return.reverseFulfillmentOrders:
-                    for rd in rfo.reverseDeliveries:
-                        if rd.deliverable.tracking.number:
-                            return rd.deliverable.tracking.number
-        return None
+        # TODO Clear all occurrences
+        return "DUMMY_TRACKING_NUMBER"
 
     @property
     def priorRefundAmount(self):
@@ -197,12 +201,18 @@ class ShopifyOrder(BaseModel):
                 total += amount
         return total
 
-    @property
-    def valid_return_shipment(self):
+    def get_valid_return_shipment(self):
         """
-        Helper method to get the first valid return shipment from the order.
-        * Can also be used as a flag.
+        Helper method to get the all valid return shipment from the order.
+
+        Returns:
+            List[ReverseFulfillment]: A list of valid return fulfillments that have:
+                - An "OPEN" status
+                - Return line items
+                - Reverse fulfillment orders with tracking numbers
         """
+
+        valid_return_fulfillments: list[ReverseFulfillment] = []
 
         for return_fulfillment in self.returns:
             if (
@@ -213,9 +223,9 @@ class ShopifyOrder(BaseModel):
                 for rfo in return_fulfillment.reverseFulfillmentOrders:
                     for rd in rfo.reverseDeliveries:
                         if rd.deliverable.tracking.number:
-                            return return_fulfillment
+                            valid_return_fulfillments.append(return_fulfillment)
 
-        return None
+        return valid_return_fulfillments
 
     def __filter_out_already_refunded_return_line_items(self):
         """

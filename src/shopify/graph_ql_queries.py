@@ -19,6 +19,12 @@ query ($first: Int, $after: String, $query: String) {
           status
           initiatedAs
         }
+        totalShippingPriceSet {
+          presentmentMoney {
+            amount
+            currencyCode
+          }
+        }
         suggestedRefund(
           suggestFullRefund: true
           refundMethodAllocation: ORIGINAL_PAYMENT_METHODS

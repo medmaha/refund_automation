@@ -4,23 +4,74 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
-class TrackingStatus(Enum):
-    NOTFOUND = "NotFound"
-    IN_TRANSIT = "InTransit"
-    DELIVERED = "Delivered"
+class TrackingStatus(str, Enum):
+    NotFound = "NotFound"
+    Delivered = "Delivered"
+    InTransit = "InTransit"
+    InfoReceived = "InfoReceived"
+    Expired = "Expired"
+    AvailableForPickup = "AvailableForPickup"
+    OutForDelivery = "OutForDelivery"
+    DeliveryFailure = "DeliveryFailure"
+    Exception = "Exception"
 
-class TrackingSubStatus(Enum):
-    IN_TRANSIT_OTHER = "InTransit"
-    NOTFOUND_OTHER = "NotFound_Other"
-    DELIVERED_OTHER = "Delivered_Other"
-    DELIVERED_SIGNED = "Delivered_Signed"
-    DELIVERED_AT_LOCKER = "Delivered_at_locked"
-    EXCEPTION_RETURNED = (
-        "Exception_Returned"  # Sender has successfully received the returned package.
-    )
-    EXCEPTION_RETURNING = (
-        "Exception_Returning"  # Package is being returned to the sender.
-    )
+
+class TrackingSubStatus(str, Enum):
+    # NotFound
+    NotFound_Other = "NotFound_Other"
+    NotFound_InvalidCode = "NotFound_InvalidCode"
+
+    # InfoReceived
+    InfoReceived = "InfoReceived"
+
+    # InTransit
+    InTransit_PickedUp = "InTransit_PickedUp"
+    InTransit_Other = "InTransit_Other"
+    InTransit_Departure = "InTransit_Departure"
+    InTransit_Arrival = "InTransit_Arrival"
+    InTransit_CustomsProcessing = "InTransit_CustomsProcessing"
+    InTransit_CustomsReleased = "InTransit_CustomsReleased"
+    InTransit_CustomsRequiringInformation = "InTransit_CustomsRequiringInformation"
+
+    # Expired
+    Expired_Other = "Expired_Other"
+
+    # AvailableForPickup
+    AvailableForPickup_Other = "AvailableForPickup_Other"
+
+    # OutForDelivery
+    OutForDelivery_Other = "OutForDelivery_Other"
+
+    # DeliveryFailure
+    DeliveryFailure_Other = "DeliveryFailure_Other"
+    DeliveryFailure_NoBody = "DeliveryFailure_NoBody"
+    DeliveryFailure_Security = "DeliveryFailure_Security"
+    DeliveryFailure_Rejected = "DeliveryFailure_Rejected"
+    DeliveryFailure_InvalidAddress = "DeliveryFailure_InvalidAddress"
+
+    # Delivered
+    Delivered_Other = "Delivered_Other"
+    Delivered_Signed = "Delivered_Signed"
+    Delivered_At_Locker = "Delivered_At_Locker"
+
+    # No Statuses
+    _None = None
+    _Empty = ""
+    _Null = "null"
+    _None_String = "None"
+
+    # Exception
+    Exception_Other = "Exception_Other"
+    Exception_Returning = "Exception_Returning"
+    Exception_Returned = "Exception_Returned"
+    Exception_NoBody = "Exception_NoBody"
+    Exception_Security = "Exception_Security"
+    Exception_Damage = "Exception_Damage"
+    Exception_Rejected = "Exception_Rejected"
+    Exception_Delayed = "Exception_Delayed"
+    Exception_Lost = "Exception_Lost"
+    Exception_Destroyed = "Exception_Destroyed"
+    Exception_Cancel = "Exception_Cancel"
 
 
 class LatestStatus(BaseModel):

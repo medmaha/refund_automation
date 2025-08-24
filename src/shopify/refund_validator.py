@@ -1,5 +1,5 @@
 from src.logger import get_logger
-from src.models.order import ShopifyOrder
+from src.models.order import ReverseFulfillment, ShopifyOrder
 from src.models.tracking import (
     TrackingData,
     TrackingStatus,
@@ -27,9 +27,12 @@ lookup_tags = [
 
 
 def validate_order_before_refund(
-    order: ShopifyOrder, tracking: TrackingData, slack_notifier: SlackNotifier
+    order: ShopifyOrder,
+    reverse_fulfillment: ReverseFulfillment,
+    tracking: TrackingData,
+    slack_notifier: SlackNotifier,
 ):
-    tracking_number = order.get_tracking_number()
+    tracking_number = tracking.number
     order_tags_string = " ".join(order.tags).lower()
     currency = order.totalPriceSet.presentmentMoney.currencyCode or "USD"
 
@@ -100,35 +103,54 @@ def validate_order_before_refund(
         # Retrieve the latests status information from the tracking data
         latest_status = tracking.track_info.latest_status
         tracking_status: str = latest_status.status.value if latest_status else ""
-        tracking_sub_status: str = latest_status.sub_status.value if latest_status else ""
+        tracking_sub_status: str = (
+            latest_status.sub_status.value if latest_status else ""
+        )
 
         allowed_sub_statuses = [
-            None,
-            TrackingSubStatus.DELIVERED_OTHER.value.lower(),
-            TrackingSubStatus.DELIVERED_SIGNED.value.lower(),
-            TrackingSubStatus.DELIVERED_AT_LOCKER.value.lower(),
+            TrackingSubStatus._None.value,
+            TrackingSubStatus._Empty.value,
+            TrackingSubStatus._Null.value.lower(),
+            TrackingSubStatus._None_String.value.lower(),
+            TrackingSubStatus.Delivered_Other.value.lower(),
+            TrackingSubStatus.Delivered_Signed.value.lower(),
+            TrackingSubStatus.Delivered_At_Locker.value.lower(),
         ]
 
-        # Block refund if any of these conditions are met
-        if (
-            not (tracking_status.lower() == TrackingStatus.DELIVERED.value.lower())
-            or
-            not (
-                (tracking_sub_status is None)
-                or
-                (tracking_sub_status and not tracking_sub_status.startswith("DELIVERED_"))
-                or
-                (tracking_sub_status and not tracking_sub_status.lower() in allowed_sub_statuses)
+        # Block refund if tracking status is not delivered or sub-status is invalid
+        is_delivered = tracking_status.lower() == TrackingStatus.Delivered.value.lower()
+
+        has_valid_sub_status = (
+            tracking_sub_status is None
+            or (
+                tracking_sub_status and not tracking_sub_status.startswith("DELIVERED_")
             )
-        ):
+            or (
+                tracking_sub_status
+                and tracking_sub_status.lower() in allowed_sub_statuses
+            )
+        )
+
+        if not (is_delivered and has_valid_sub_status):
             return log_invalid_tracking_status(
-                order, tracking_number, currency, tracking_status, tracking_sub_status, slack_notifier
+                order,
+                tracking_number,
+                currency,
+                tracking_status,
+                tracking_sub_status,
+                slack_notifier,
+                return_name=reverse_fulfillment.name,
             )
 
         is_eligible, timing_details = validate_refund_timing(tracking)
         if not is_eligible:
             return log_timing_validation_error(
-                order, timing_details, tracking_number, currency, slack_notifier
+                order,
+                timing_details,
+                tracking_number,
+                currency,
+                slack_notifier,
+                reverse_fulfillment.name,
             )
 
     return True
@@ -237,8 +259,11 @@ def log_timing_validation_error(
     tracking_number: str,
     currency: str,
     slack_notifier: SlackNotifier,
+    return_name: str,
 ):
-    err_message = timing_details.pop("reason", "Tracking failed timing validation")
+    err_message = timing_details.pop(
+        "reason", f"Tracking failed timing validation: Return({return_name})"
+    )
     logger.warning(
         err_message,
         extra={
@@ -274,9 +299,19 @@ def log_invalid_tracking_status(
     tracking_status: str,
     tracking_sub_status: str,
     slack_notifier: SlackNotifier,
+    return_name: str,
 ):
     logger.warning(
-        f"Invalid tracking status for: Order({order.name})",
+        f"Invalid tracking status for: Order({order.name}) Return({return_name})",
+        extra={
+            "order_id": order.id,
+            "order_name": order.name,
+            "tracking_status": tracking_status,
+            "tracking_sub_status": tracking_sub_status,
+        },
+    )
+    logger.warning(
+        f"Skipping refund for: Order({order.name}) Return({return_name})",
         extra={
             "order_id": order.id,
             "order_name": order.name,

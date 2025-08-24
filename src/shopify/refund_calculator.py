@@ -32,10 +32,15 @@ class RefundCalculationResult(BaseModel):
     partial_return_shipping: Optional[str]
 
     def __init__(self, **kwargs):
-        kwargs.setdefault("full_return_shipping", "Policy OFF" if not REFUND_FULL_SHIPPING else "Policy ON" )
-        kwargs.setdefault("partial_return_shipping", "Policy OFF" if not REFUND_PARTIAL_SHIPPING else "Policy ON" )
+        kwargs.setdefault(
+            "full_return_shipping",
+            "Policy OFF" if not REFUND_FULL_SHIPPING else "Policy ON",
+        )
+        kwargs.setdefault(
+            "partial_return_shipping",
+            "Policy OFF" if not REFUND_PARTIAL_SHIPPING else "Policy ON",
+        )
         super().__init__(**kwargs)
-
 
 
 class RefundCalculator:

@@ -16,7 +16,7 @@ from src.utils.timezone import timezone_handler
 logger = get_logger(__name__)
 
 
-class TimingValidationResult(Enum):
+class TimingValidationResult(str, Enum):
     """Results of timing validation."""
 
     ELIGIBLE = "eligible"
@@ -126,9 +126,9 @@ class DeliveryTimingValidator:
             if tracking_data.track_info.latest_event:
                 if (
                     tracking_data.track_info.latest_status.status
-                    == TrackingStatus.DELIVERED
+                    == TrackingStatus.Delivered
                     and tracking_data.track_info.latest_status.sub_status
-                    == TrackingSubStatus.DELIVERED_OTHER
+                    == TrackingSubStatus.Delivered_Other
                 ):
                     delivered_at = tracking_data.track_info.latest_event.time_utc
                     return timezone_handler.parse_shopify_datetime(delivered_at)

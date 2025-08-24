@@ -11,7 +11,7 @@ from src.utils.timezone import get_current_time_iso8601
 logger = get_logger(__name__)
 
 
-class AuditEventType(Enum):
+class AuditEventType(str, Enum):
     """Types of audit events."""
 
     REFUND_INITIATED = "refund_initiated"

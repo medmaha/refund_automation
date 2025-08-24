@@ -9,6 +9,7 @@ from src.config import (
 )
 from src.logger import get_logger
 from src.models.order import ShopifyOrder
+from src.models.tracking import TrackingData
 from src.shopify.graph_ql_queries import RETURN_ORDERS_QUERY
 from src.shopify.tracking import (
     fetch_tracking_details,
@@ -23,13 +24,11 @@ logger = get_logger(__name__)
 REQUEST_PAGINATION_SIZE = 12
 MAX_SHOPIFY_ORDER_DATA = 10_000
 
-ELIGIBLE_ORDERS_QUERY = """
-financial_status:PAID OR
-financial_status:PARTIALLY_PAID OR
-financial_status:PARTIALLY_REFUNDED AND
-(return_status:RETURNED OR return_status:IN_PROGRESS) AND
-(fulfillment_status:FULFILLED OR fulfillment_status:PARTIALLY_FULFILLED)
-"""
+ELIGIBLE_ORDERS_QUERY = (
+    "(return_status:RETURNED OR return_status:IN_PROGRESS) AND "
+    "(fulfillment_status:FULFILLED OR fulfillment_status:PARTIAL) AND "
+    "(financial_status:PAID OR financial_status:PARTIALLY_PAID OR financial_status:PARTIALLY_REFUNDED) "
+)
 
 
 def __cleanup_shopify_orders(orders: list[ShopifyOrder]):
@@ -42,7 +41,7 @@ def __cleanup_shopify_orders(orders: list[ShopifyOrder]):
         order = orders.pop()
         while True:
             # Only keep orders that have at least one valid shipment
-            if order.valid_return_shipment:
+            if order.get_valid_return_shipment():
                 cleaned_orders.append(order)
                 logger.debug(
                     f"Order {getattr(order, 'id', None)} added to cleaned orders"
@@ -145,6 +144,7 @@ def __fetch_all_shopify_orders():
             )
 
             errors = data.get("errors")
+
             if errors:
                 logger.error(f"Shopify API errors: {errors}")
                 slack_notifier.send_error(
@@ -239,13 +239,8 @@ def __process_orders_for_tracking(orders: list[ShopifyOrder]):
     # Register trackings with the API
     register_orders_trackings(payload)
 
-    # Wait for tracking registration to sync
-    sync_delay = 5  # seconds
-    logger.info(f"Waiting {sync_delay} seconds for tracking registration to sync")
-    time.sleep(sync_delay)
-
     # Fetch and match tracking details with orders
-    trackings = fetch_tracking_details(payload, cleaned_orders)
+    trackings = fetch_tracking_details(payload)
 
     logger.info(
         f"Tracking processing complete: {len(trackings)} matched trackings",
@@ -259,7 +254,9 @@ def __process_orders_for_tracking(orders: list[ShopifyOrder]):
     return trackings
 
 
-def retrieve_refundable_shopify_orders():
+def retrieve_refundable_shopify_orders() -> tuple[
+    list[ShopifyOrder], list[TrackingData]
+]:
     """
     Retrieve all matching Shopify orders and merge them with their 17track tracking information.
 
@@ -271,12 +268,12 @@ def retrieve_refundable_shopify_orders():
         orders = __fetch_all_shopify_orders()
 
         if not orders:
-            return []
+            return ([], [])
 
         # Step 2: Process orders for tracking information
         trackings = __process_orders_for_tracking(orders)
 
-        return trackings
+        return (orders, trackings)
 
     except Exception as e:
         error_msg = f"Failed to retrieve fulfilled Shopify orders: {e}"

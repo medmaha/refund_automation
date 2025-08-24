@@ -9,7 +9,7 @@ from src.utils.timezone import get_current_time_iso8601
 
 
 def create_dry_run_refund(
-    order: ShopifyOrder, refund_calculation: RefundCalculationResult
+    order: ShopifyOrder, refund_calculation: RefundCalculationResult, return_id: str
 ) -> RefundCreateResponse:
     """Create a mock refund for dry run mode using refund calculation."""
     from src.models.order import MoneyBag, MoneyBagSet

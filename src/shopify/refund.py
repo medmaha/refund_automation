@@ -1,40 +1,25 @@
-import json
 import sys
-import time
 import uuid
-from typing import Optional
-
-import requests
 
 from src.config import (
     DRY_RUN,
     REFUND_FULL_SHIPPING,
     REFUND_PARTIAL_SHIPPING,
-    REQUEST_TIMEOUT,
-    SHOPIFY_ACCESS_TOKEN,
-    SHOPIFY_STORE_URL,
 )
 from src.logger import get_logger
 from src.models.order import RefundCreateResponse, ReverseFulfillment, ShopifyOrder
 from src.models.tracking import TrackingData
-from src.shopify.graph_ql_queries import REFUND_CREATE_MUTATION
 from src.shopify.orders import retrieve_refundable_shopify_orders
 from src.shopify.refund_calculator import refund_calculator
+from src.shopify.refund_mutation import execute_shopify_refund
 from src.shopify.refund_validator import validate_order_before_refund
 from src.utils.audit import audit_logger, log_refund_audit
 from src.utils.dry_run import create_dry_run_refund
 from src.utils.idempotency import idempotency_manager
-from src.utils.retry import exponential_backoff_retry
 from src.utils.slack import slack_notifier
 from src.utils.timezone import get_current_time_iso8601, timezone_handler
 
 logger = get_logger(__name__)
-
-endpoint = f"https://{SHOPIFY_STORE_URL}.myshopify.com/admin/api/2025-07/graphql.json"
-headers = {
-    "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
-    "Content-Type": "application/json",
-}
 
 EXECUTION_MODE = "LIVE" if not DRY_RUN else "DRY_RUN"
 
@@ -71,9 +56,6 @@ def process_refund_automation():
         return sys.exit(0)
 
     # Initializing counters for summary
-    successful_refunds = 0
-    failed_refunds = 0
-    skipped_refunds = 0
     total_refunded_amount = 0.0
     currency = "USD"
     refunded_orders = {}
@@ -81,13 +63,14 @@ def process_refund_automation():
     logger.info(f"Processing {len(trackings)} orders for potential refunds")
 
     refunded_returns: list[ReverseFulfillment] = []
+    failed_returns: list[ReverseFulfillment] = []
     skipped_returns: list[ReverseFulfillment] = []
 
-    for idx, order in enumerate(orders):
+    for idx, order in enumerate(orders, start=1):
         logger.info(
-            f"Processing order {idx + 1}/{len(trackings)} - {order.name}",
+            f"Processing order {idx}/{len(orders)} - {order.name}",
             extra={
-                "progress": f"{idx + 1}/{len(trackings)}",
+                "progress": f"{idx}/{len(orders)}",
                 "order_id": order.id,
                 "order_name": order.name,
             },
@@ -110,7 +93,12 @@ def process_refund_automation():
         }
         # Process refund with comprehensive error handling
         try:
-            refunded_returns, skipped_returns = refund_order(order, trackings)
+            _refunded_returns, _skipped_returns, _failed_returns = refund_order(order, trackings)
+
+            failed_returns.extend(_failed_returns)
+            skipped_returns.extend(_skipped_returns)
+            refunded_returns.extend(_refunded_returns)
+
             if refunded_returns:
                 logger.info(
                     f"Successfully refunded Order({order.name})",
@@ -132,7 +120,6 @@ def process_refund_automation():
                     f"Refund not processed for: Order({order.name})",
                     extra=extra_details,
                 )
-                failed_refunds += 1
 
             slack_notifier.send_success(
                 f"Refund processed completed for: Order({order.name})",
@@ -147,8 +134,6 @@ def process_refund_automation():
                     "error": str(e),
                 },
             )
-            failed_refunds += 1
-
             # Send error notification
             slack_notifier.send_error(
                 f"Failed to process refund for order {order.name}",
@@ -161,9 +146,9 @@ def process_refund_automation():
             extra={
                 "orders": len(orders),
                 "trackings": len(trackings),
-                "successful_refunds": successful_refunds,
-                "failed_refunds": failed_refunds,
-                "skipped_refunds": skipped_refunds,
+                "successful_refunds": len(refunded_returns),
+                "failed_refunds": len(failed_returns),
+                "skipped_refunds": len(skipped_returns)
             },
         )
         slack_notifier.send_warning(
@@ -171,21 +156,24 @@ def process_refund_automation():
             details={
                 "orders": len(orders),
                 "trackings": len(trackings),
-                "successful_refunds": successful_refunds,
-                "failed_refunds": failed_refunds,
-                "skipped_refunds": skipped_refunds,
+                "successful_refunds": len(refunded_returns),
+                "failed_refunds": len(failed_returns),
+                "skipped_refunds": len(skipped_returns)
             },
         )
         return sys.exit(0)
 
     # Log final summary
     summary_msg = "Refund processing completed"
+
+    total_refunded_amount = sum([refund.returned_amount for refund in refunded_returns])
+
     logger.info(
         summary_msg,
         extra={
-            "successful_refunds": successful_refunds,
-            "failed_refunds": failed_refunds,
-            "skipped_refunds": skipped_refunds,
+            "successful_refunds": len(refunded_returns),
+            "failed_refunds": len(failed_returns),
+            "skipped_refunds": len(skipped_returns),
             "total_refunded_amount": f"{total_refunded_amount:.2f}",
             "currency": currency,
             "mode": EXECUTION_MODE,
@@ -194,9 +182,9 @@ def process_refund_automation():
 
     # Send summary Slack notification
     slack_notifier.send_refund_summary(
-        successful_refunds=successful_refunds,
-        failed_refunds=failed_refunds,
-        skipped_refunds=skipped_refunds,
+        successful_refunds=len(refunded_returns),
+        failed_refunds=len(failed_returns),
+        skipped_refunds=len(skipped_returns),
         total_amount=total_refunded_amount,
         currency=currency,
     )
@@ -231,6 +219,7 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
 
     skipped_reverse_fulfillments: list[ReverseFulfillment] = []
     refunded_reverse_fulfillments: list[ReverseFulfillment] = []
+    errored_reverse_fulfillments: list[ReverseFulfillment] = []
 
     try:
         valid_reverse_fulfillments = order.get_valid_return_shipment()
@@ -417,15 +406,61 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
                     "currency": currency,
                 }
             }
+            try:
+                if EXECUTION_MODE == "LIVE":
+                    # Execute the actual refund with retry mechanism
+                    refund: RefundCreateResponse = execute_shopify_refund(
+                        order, variables, request_id, reverse_fulfillment.name
+                    )
+                else:
+                    # Create a mock refund for dry run
+                    refund = create_dry_run_refund(
+                        order, refund_calculation, reverse_fulfillment.name
+                    )
+            except Exception as e:
+                refund = None
+                errored_reverse_fulfillments.append(reverse_fulfillment)
+                error_msg = f"Refund failed for: Order{order.name} Return({reverse_fulfillment.name})"
 
-            if EXECUTION_MODE == "LIVE":
-                # Execute the actual refund with retry mechanism
-                refund = _execute_shopify_refund(order, variables, request_id)
-            else:
-                # Create a mock refund for dry run
-                refund = create_dry_run_refund(order, refund_calculation)
+                logger.error(
+                    error_msg,
+                    extra={
+                        "order_id": order.id,
+                        "order_name": order.name,
+                        "error": str(e),
+                        "request_id": request_id,
+                        "decision_branch": "failed",
+                    },
+                    exc_info=True,
+                )
+
+                # Log audit event for failure
+                log_refund_audit(
+                    order_id=order.id,
+                    order_name=order.name,
+                    refund_amount=order_amount,
+                    currency=currency,
+                    decision="failed",
+                    tracking_number=tracking_number,
+                    error=str(e),
+                )
+
+                # Send error notification with request ID for escalation
+                slack_notifier.send_error(
+                    error_msg,
+                    details={
+                        "order_id": order.id,
+                        "order_name": order.name,
+                        "error_type": type(e).__name__,
+                        "error": error_msg,
+                    },
+                    request_id=request_id,
+                )
 
             if refund:
+                reverse_fulfillment.returned_amount = refund.totalRefundedSet.presentmentMoney.amount
+                refunded_reverse_fulfillments.append(reverse_fulfillment)
+
                 log_refund_audit(
                     order_id=order.id,
                     order_name=order.name,
@@ -477,16 +512,16 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
                         "order_name": order.name,
                         "tracking_number": tracking_number,
                         "variables": variables,
-                        **refund_calculation.model_dump(exclude=["transactions", "line_items_to_refund"]),
+                        **refund_calculation.model_dump(
+                            exclude=["transactions", "line_items_to_refund"]
+                        ),
                     },
                 )
-
-                refunded_reverse_fulfillments.append(reverse_fulfillment)
             else:
-                raise ValueError("Refund Creation Failed")
+                skipped_reverse_fulfillments.append(reverse_fulfillment)
 
     except Exception as e:
-        error_msg = f"Refund failed for order {order.name}: {str(e)}"
+        error_msg = f"Refund failed for order {order.name}"
 
         logger.error(
             error_msg,
@@ -523,164 +558,7 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
             request_id=request_id,
         )
 
-    return (refunded_reverse_fulfillments, skipped_reverse_fulfillments)
-
-
-@exponential_backoff_retry(
-    exceptions=(
-        requests.exceptions.RequestException,
-        requests.exceptions.Timeout,
-        Exception,
-    )
-)
-def _execute_shopify_refund(
-    order: ShopifyOrder, variables: dict, request_id: str
-) -> Optional[RefundCreateResponse]:
-    """Execute the Shopify refund API call with retry mechanism."""
-
-    start_time = time.time()
-
-    # Log API request for audit
-    audit_logger.log_api_interaction(
-        request_type="POST", endpoint=endpoint, order_id=order.id, request_id=request_id
-    )
-
-    try:
-        response = requests.post(
-            endpoint,
-            headers=headers,
-            json={"query": REFUND_CREATE_MUTATION, "variables": variables},
-            timeout=REQUEST_TIMEOUT,
-        )
-
-        response_time_ms = (time.time() - start_time) * 1000
-
-        logger.debug(
-            f"Shopify API response received for order {order.name}",
-            extra={
-                "status_code": response.status_code,
-                "response_time_ms": response_time_ms,
-                "order_id": order.id,
-                "request_id": request_id,
-            },
-        )
-
-        response.raise_for_status()
-        data = response.json()
-
-        # Log API response for audit
-        audit_logger.log_api_interaction(
-            request_type="POST",
-            endpoint=endpoint,
-            order_id=order.id,
-            request_id=request_id,
-            status_code=response.status_code,
-            response_time_ms=response_time_ms,
-        )
-
-        # Handle null JSON response
-        if data is None:
-            logger.error(
-                f"Received null JSON response from Shopify for order {order.name}",
-                extra={"order_id": order.id, "request_id": request_id},
-            )
-            return None
-
-        # Process Shopify response
-        response_data = data.get("data") if data else None
-        if response_data is None:
-            logger.error(
-                f"No 'data' field in Shopify response for order {order.name}",
-                extra={
-                    "order_id": order.id,
-                    "request_id": request_id,
-                    "response": data,
-                },
-            )
-            return None
-
-        user_errors = response_data.get("refundCreate", {}).get("userErrors", [])
-        refund_data = response_data.get("refundCreate", {}).get("refund", None)
-
-        if user_errors:
-            error_messages = [err["message"] for err in user_errors]
-            error_msg = f"Shopify API errors for order {order.name}: {error_messages}"
-
-            logger.error(
-                error_msg,
-                extra={
-                    "order_id": order.id,
-                    "order_name": order.name,
-                    "shopify_errors": error_messages,
-                    "request_id": request_id,
-                },
-            )
-            # Log API error for audit
-            audit_logger.log_api_interaction(
-                request_type="POST",
-                endpoint=endpoint,
-                order_id=order.id,
-                request_id=request_id,
-                status_code=response.status_code,
-                response_time_ms=response_time_ms,
-                error="Shopify user errors: " + "; ".join(error_messages),
-            )
-            slack_notifier.send_error(error_msg)
-
-            if refund_data:
-                error_msg = (
-                    f"Shopify API errors for order {order.name}: {error_messages}"
-                )
-                logger.warning(
-                    error_msg,
-                    extra={
-                        "order_id": order.id,
-                        "order_name": order.name,
-                        "shopify_errors": error_messages,
-                        "request_id": request_id,
-                    },
-                )
-                slack_notifier.send_warning(
-                    error_msg,
-                    details={
-                        "message": "An error accurred while mutating refunds",
-                        "request_id": request_id,
-                        "order_id": order.id,
-                        "order_name": order.name,
-                    },
-                )
-
-        if not refund_data:
-            logger.error(
-                f"No refund data returned from Shopify for order {order.name}",
-                extra={"order_id": order.id, "request_id": request_id},
-            )
-            slack_notifier.send_error(
-                f"No refund data returned from Shopify for order {order.name}",
-                details={
-                    "order_id": order.id,
-                    "request_id": request_id,
-                    "response_data": (json.dumps(data)),
-                },
-            )
-            return None
-
-        # Enrich refund data
-        refund_data["orderId"] = order.id
-        refund_data["orderName"] = order.name
-
-        return RefundCreateResponse(**refund_data)
-
-    except requests.exceptions.RequestException as e:
-        # Log API error for audit
-        audit_logger.log_api_interaction(
-            request_type="POST",
-            endpoint=endpoint,
-            order_id=order.id,
-            request_id=request_id,
-            error=str(e),
-        )
-        raise  # Re-raise for retry mechanism
+    return (refunded_reverse_fulfillments, skipped_reverse_fulfillments, errored_reverse_fulfillments)
 
 
 def get_reverse_fulfillment_tracking_details(
@@ -688,9 +566,6 @@ def get_reverse_fulfillment_tracking_details(
 ):
     if not reverse_fulfillment.reverseFulfillmentOrders:
         return None
-
-    if "3" in reverse_fulfillment.name or "4" in reverse_fulfillment.name:
-        print(reverse_fulfillment.name)
 
     for rfo in reverse_fulfillment.reverseFulfillmentOrders:
         for reverse_delivery in rfo.reverseDeliveries:

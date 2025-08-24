@@ -69,6 +69,8 @@ class ReverseFulfillment(BaseModel):
     returnLineItems: List[ReturnLineItem] = Field(default_factory=list)
     reverseFulfillmentOrders: List[ReverseFulfillmentOrder]
 
+    returned_amount: float = Field(default=0.0)
+
     @property
     def tracking_number(self):
         for rfo in self.reverseFulfillmentOrders:

@@ -20,7 +20,7 @@ SHOPIFY_TIMEZONE = os.getenv("SHOPIFY_TIMEZONE", "UTC")
 # Shipping Return Policies
 REFUND_FULL_SHIPPING = os.getenv("REFUND_FULL_SHIPPING", "true").lower() == "true"
 REFUND_PARTIAL_SHIPPING = (
-    os.getenv("REFUND_PARTIAL_SHIPPINGs", "true").lower() == "true"
+    os.getenv("REFUND_PARTIAL_SHIPPING", "true").lower() == "true"
 )
 
 # Slack Notifications

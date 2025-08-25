@@ -4,8 +4,8 @@ import requests
 
 from src.config import (
     REQUEST_TIMEOUT,
-    SHOPIFY_ACCESS_TOKEN,
-    SHOPIFY_STORE_URL,
+    SHOPIFY_API_HEADERS,
+    SHOPIFY_API_URL,
 )
 from src.logger import get_logger
 from src.models.order import ShopifyOrder
@@ -25,6 +25,7 @@ REQUEST_PAGINATION_SIZE = 12
 MAX_SHOPIFY_ORDER_DATA = 10_000
 
 ELIGIBLE_ORDERS_QUERY = (
+    "name:1030 AND "
     "(return_status:RETURNED OR return_status:IN_PROGRESS) AND "
     "(fulfillment_status:FULFILLED OR fulfillment_status:PARTIAL) AND "
     "(financial_status:PAID OR financial_status:PARTIALLY_PAID OR financial_status:PARTIALLY_REFUNDED) "
@@ -65,19 +66,19 @@ def __cleanup_shopify_orders(orders: list[ShopifyOrder]):
         return cleaned_orders
 
 
-def __fetch_shopify_orders(endpoint: str, headers: dict, variables: dict):
+def __fetch_shopify_orders(variables: dict):
     # Making the GraphQL request to Shopify
     try:
         response = requests.post(
-            endpoint,
-            headers=headers,
+            SHOPIFY_API_URL,
+            headers=SHOPIFY_API_HEADERS,
             timeout=REQUEST_TIMEOUT,
             json={"query": RETURN_ORDERS_QUERY, "variables": variables},
         )
         response.raise_for_status()
         audit_logger.log_api_interaction(
             order_id="",
-            endpoint=endpoint,
+            endpoint=SHOPIFY_API_URL,
             request_type="graphql",
             status_code=response.status_code,
             request_id=f"fetch_shopify_orders_{time.time()}",
@@ -89,7 +90,7 @@ def __fetch_shopify_orders(endpoint: str, headers: dict, variables: dict):
         logger.error("Unhandled error while fetching orders", extra={"error": str(e)})
         audit_logger.log_api_interaction(
             order_id="",
-            endpoint=endpoint,
+            endpoint=SHOPIFY_API_URL,
             request_type="graphql",
             status_code=400,
             request_id="fetch_shopify_orders",
@@ -104,14 +105,6 @@ def __fetch_all_shopify_orders():
 
     logger.info(
         f"Fetching all refundable Shopify orders: max({MAX_SHOPIFY_ORDER_DATA})"
-    )
-
-    headers = {
-        "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
-        "Content-Type": "application/json",
-    }
-    endpoint = (
-        f"https://{SHOPIFY_STORE_URL}.myshopify.com/admin/api/2025-07/graphql.json"
     )
 
     cursor = None
@@ -139,9 +132,7 @@ def __fetch_all_shopify_orders():
         logger.debug(f"Requesting orders page with cursor: {cursor}")
 
         try:
-            data = __fetch_shopify_orders(
-                endpoint=endpoint, headers=headers, variables=variables
-            )
+            data = __fetch_shopify_orders(variables=variables)
 
             errors = data.get("errors")
 

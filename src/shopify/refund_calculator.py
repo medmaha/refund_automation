@@ -27,6 +27,7 @@ class RefundCalculationResult(BaseModel):
     tax_refund: float = 0.0
     discount_deduction: float = 0.0
     prior_refund: float = 0.0
+    order_total: float = 0.0
 
     full_return_shipping: Optional[str]
     partial_return_shipping: Optional[str]
@@ -165,6 +166,7 @@ class RefundCalculator:
             shipping_refund=self.__normalize_amount(shipping_refund),
             tax_refund=self.__normalize_amount(tax_refund),
             prior_refund=self.__normalize_amount(order.priorRefundAmount),
+            order_total=self.__normalize_amount(order.totalPriceSet.presentmentMoney.amount),
             line_items_to_refund=refund_line_items,
             transactions=transactions,
         )
@@ -220,20 +222,25 @@ class RefundCalculator:
         if not REFUND_PARTIAL_SHIPPING:
             shipping_refund = Decimal("0")
         else:
-            prior_shipping = Decimal(
-                str(order.totalRefundedShippingSet.presentmentMoney.amount)
-            )
+            prior_shipping = Decimal(str(order.totalRefundedShippingSet.presentmentMoney.amount))
             shipping_refund = self._calculate_proportional_shipping_refund(
                 order, returned_line_items_data
             )
 
-            # Cap the shipping refund to remaining shipping balance, if value exceeded
-            if prior_shipping and shipping_refund:
-                shipping_refund = shipping_refund + prior_shipping
-                if shipping_refund > original_shipping:
-                    shipping_refund = (
-                        original_shipping - prior_shipping
-                    )  # Cap to remaining
+            if prior_shipping:
+                remaining_shipping = max(Decimal("0"), original_shipping - prior_shipping)
+                shipping_refund = min(remaining_shipping, shipping_refund)
+                
+                # Ensure total refunded shipping matches original if amounts are close
+                if abs((shipping_refund + prior_shipping) - original_shipping) < Decimal("0.01"):
+                    shipping_refund = original_shipping - prior_shipping
+                    
+                self.logger.debug(
+                    f"Capped shipping refund to {shipping_refund} "
+                    f"(original: {original_shipping}, "
+                    f"prior: {prior_shipping}, "
+                    f"remaining: {remaining_shipping})"
+                )
 
         # Calculate proportional tax refund
         tax_refund = self._calculate_proportional_tax_refund(returned_line_items_data)
@@ -254,6 +261,7 @@ class RefundCalculator:
             shipping_refund=self.__normalize_amount(shipping_refund),
             tax_refund=self.__normalize_amount(tax_refund),
             prior_refund=self.__normalize_amount(order.priorRefundAmount),
+            order_total=self.__normalize_amount(order.totalPriceSet.presentmentMoney.amount),
             line_items_to_refund=refund_line_items,
             transactions=transactions,
         )

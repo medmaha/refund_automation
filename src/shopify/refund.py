@@ -101,8 +101,9 @@ def process_refund_automation():
             skipped_returns.extend(_skipped_returns)
             refunded_returns.extend(_refunded_returns)
 
-            if refunded_returns:
+            if refunded_returns and not DRY_RUN:
                 close_processed_returns(order, refunded_returns)
+
                 logger.info(
                     f"Successfully refunded Order({order.name})",
                     extra=extra_details,
@@ -117,7 +118,7 @@ def process_refund_automation():
                         ),
                     }
                 )
-
+                
             else:
                 logger.warning(
                     f"Refund not processed for: Order({order.name})",
@@ -316,7 +317,7 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
             is_valid_refund = validate_order_before_refund(
                 order, reverse_fulfillment, tracking, slack_notifier
             )
-            
+
             if not is_valid_refund:
                 skipped_reverse_fulfillments.append(reverse_fulfillment)
                 continue
@@ -461,7 +462,7 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
                     request_id=request_id,
                 )
 
-            if refund:
+            if refund:                    
                 reverse_fulfillment.returned_amount = (
                     refund.totalRefundedSet.presentmentMoney.amount
                 )

@@ -13,6 +13,7 @@ from src.shopify.orders import retrieve_refundable_shopify_orders
 from src.shopify.refund_calculator import refund_calculator
 from src.shopify.refund_mutation import execute_shopify_refund
 from src.shopify.refund_validator import validate_order_before_refund
+from src.shopify.return_closing import close_processed_returns
 from src.utils.audit import audit_logger, log_refund_audit
 from src.utils.dry_run import create_dry_run_refund
 from src.utils.idempotency import idempotency_manager
@@ -22,7 +23,6 @@ from src.utils.timezone import get_current_time_iso8601, timezone_handler
 logger = get_logger(__name__)
 
 EXECUTION_MODE = "LIVE" if not DRY_RUN else "DRY_RUN"
-
 
 def process_refund_automation():
     """Process fulfilled Shopify orders and handle refunds if eligible."""
@@ -93,13 +93,16 @@ def process_refund_automation():
         }
         # Process refund with comprehensive error handling
         try:
-            _refunded_returns, _skipped_returns, _failed_returns = refund_order(order, trackings)
+            _refunded_returns, _skipped_returns, _failed_returns = refund_order(
+                order, trackings
+            )
 
             failed_returns.extend(_failed_returns)
             skipped_returns.extend(_skipped_returns)
             refunded_returns.extend(_refunded_returns)
 
             if refunded_returns:
+                close_processed_returns(order, refunded_returns)
                 logger.info(
                     f"Successfully refunded Order({order.name})",
                     extra=extra_details,
@@ -148,7 +151,7 @@ def process_refund_automation():
                 "trackings": len(trackings),
                 "successful_refunds": len(refunded_returns),
                 "failed_refunds": len(failed_returns),
-                "skipped_refunds": len(skipped_returns)
+                "skipped_refunds": len(skipped_returns),
             },
         )
         slack_notifier.send_warning(
@@ -158,7 +161,7 @@ def process_refund_automation():
                 "trackings": len(trackings),
                 "successful_refunds": len(refunded_returns),
                 "failed_refunds": len(failed_returns),
-                "skipped_refunds": len(skipped_returns)
+                "skipped_refunds": len(skipped_returns),
             },
         )
         return sys.exit(0)
@@ -265,16 +268,6 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
                 skipped_reverse_fulfillments.append(reverse_fulfillment)
                 continue
 
-            # Validate the order and the tracking information before performing any mutations
-            is_valid_refund = validate_order_before_refund(
-                order, reverse_fulfillment, tracking, slack_notifier
-            )
-            if not is_valid_refund:
-                skipped_reverse_fulfillments.append(reverse_fulfillment)
-                continue
-
-            tracking_number = tracking.number
-
             idempotency_key, is_duplicated = (
                 idempotency_manager.check_operation_idempotency(
                     order.id,
@@ -318,6 +311,17 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
 
                 skipped_reverse_fulfillments.append(reverse_fulfillment)
                 continue
+
+            # Validate the order and the tracking information before performing any mutations
+            is_valid_refund = validate_order_before_refund(
+                order, reverse_fulfillment, tracking, slack_notifier
+            )
+            
+            if not is_valid_refund:
+                skipped_reverse_fulfillments.append(reverse_fulfillment)
+                continue
+
+            tracking_number = tracking.number
 
             # Get the monetary calculations of this refund
             refund_calculation = refund_calculator.calculate_refund(
@@ -458,7 +462,9 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
                 )
 
             if refund:
-                reverse_fulfillment.returned_amount = refund.totalRefundedSet.presentmentMoney.amount
+                reverse_fulfillment.returned_amount = (
+                    refund.totalRefundedSet.presentmentMoney.amount
+                )
                 refunded_reverse_fulfillments.append(reverse_fulfillment)
 
                 log_refund_audit(
@@ -558,7 +564,11 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
             request_id=request_id,
         )
 
-    return (refunded_reverse_fulfillments, skipped_reverse_fulfillments, errored_reverse_fulfillments)
+    return (
+        refunded_reverse_fulfillments,
+        skipped_reverse_fulfillments,
+        errored_reverse_fulfillments,
+    )
 
 
 def get_reverse_fulfillment_tracking_details(

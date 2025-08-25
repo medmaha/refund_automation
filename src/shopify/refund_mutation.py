@@ -24,8 +24,6 @@ headers = {
     "Content-Type": "application/json",
 }
 
-TEST_SCENARIO_STATUS_CODES = os.getenv("TEST_SCENARIO_STATUS_CODES", "")
-
 
 @exponential_backoff_retry(
     exceptions=(
@@ -46,7 +44,7 @@ def execute_shopify_refund(
 
     try:
         # Simulate 500 error for test scenario
-        if "500" in TEST_SCENARIO_STATUS_CODES:
+        if "500" in os.getenv("TEST_SCENARIO_STATUS_CODES", ""):
             raise Exception(
                 "500 Server Error: Internal Server Error for url: " + endpoint,
             )

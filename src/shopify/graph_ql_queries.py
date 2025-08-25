@@ -207,7 +207,6 @@ mutation RefundLineItem($returnId: ID!) {
       closedAt
     }
     userErrors {
-      code
       field
       message
     }

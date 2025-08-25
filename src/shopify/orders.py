@@ -192,9 +192,12 @@ def __fetch_all_shopify_orders():
 
 def __process_orders_for_tracking(orders: list[ShopifyOrder]):
     """Process orders to generate and register tracking information."""
+
+    empty_entries = ([], [])
+
     if not orders:
         logger.info("No orders to process")
-        return []
+        return  empty_entries
 
     logger.info(f"Processing {len(orders)} orders for tracking")
     slack_notifier.send_info(f"Processing {len(orders)} orders for tracking")
@@ -207,7 +210,7 @@ def __process_orders_for_tracking(orders: list[ShopifyOrder]):
     if not cleaned_orders:
         logger.info("No eligible orders remain after cleanup")
         slack_notifier.send_info("No eligible orders found after filtering")
-        return []
+        return  empty_entries
 
     logger.info(
         f"Cleaned orders: {len(cleaned_orders)} eligible out of {len(orders)} total"
@@ -218,14 +221,14 @@ def __process_orders_for_tracking(orders: list[ShopifyOrder]):
     )
 
     if not cleaned_orders:
-        return []
+        return empty_entries
 
     # Generate tracking payload
     payload = generate_tracking_payload(cleaned_orders)
 
     if not payload:
         logger.warning("No tracking payload generated")
-        return []
+        return empty_entries
 
     # Register trackings with the API
     register_orders_trackings(payload)

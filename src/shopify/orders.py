@@ -210,7 +210,7 @@ def __process_orders_for_tracking(orders: list[ShopifyOrder]):
 
     # Clean up orders to remove ineligible ones
     cleaned_orders = __cleanup_shopify_orders(
-        orders.copy()
+        orders
     )  # Use copy to avoid modifying original
 
     if not cleaned_orders:
@@ -251,7 +251,7 @@ def __process_orders_for_tracking(orders: list[ShopifyOrder]):
         },
     )
 
-    return trackings
+    return cleaned_orders, trackings
 
 
 def retrieve_refundable_shopify_orders() -> tuple[
@@ -271,9 +271,9 @@ def retrieve_refundable_shopify_orders() -> tuple[
             return ([], [])
 
         # Step 2: Process orders for tracking information
-        trackings = __process_orders_for_tracking(orders)
+        cleaned_orders, trackings = __process_orders_for_tracking(orders)
 
-        return (orders, trackings)
+        return (cleaned_orders, trackings)
 
     except Exception as e:
         error_msg = f"Failed to retrieve fulfilled Shopify orders: {e}"

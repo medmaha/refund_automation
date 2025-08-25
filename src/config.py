@@ -14,14 +14,21 @@ RETURN_TRACKING_SUB_STATUS = "Delivered_Other"
 
 # Shopify
 SHOPIFY_STORE_URL = os.getenv("SHOPIFY_STORE_URL")
+# SHOPIFY_STORE_NAME = os.getenv("SHOPIFY_STORE_NAME")
 SHOPIFY_ACCESS_TOKEN = os.getenv("SHOPIFY_ACCESS_TOKEN")
 SHOPIFY_TIMEZONE = os.getenv("SHOPIFY_TIMEZONE", "UTC")
 
+SHOPIFY_API_URL = (
+    f"https://{SHOPIFY_STORE_URL}.myshopify.com/admin/api/2025-07/graphql.json"
+)
+SHOPIFY_API_HEADERS = {
+    "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
+    "Content-Type": "application/json",
+}
+
 # Shipping Return Policies
 REFUND_FULL_SHIPPING = os.getenv("REFUND_FULL_SHIPPING", "true").lower() == "true"
-REFUND_PARTIAL_SHIPPING = (
-    os.getenv("REFUND_PARTIAL_SHIPPING", "true").lower() == "true"
-)
+REFUND_PARTIAL_SHIPPING = os.getenv("REFUND_PARTIAL_SHIPPING", "true").lower() == "true"
 
 # Slack Notifications
 SLACK_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL")

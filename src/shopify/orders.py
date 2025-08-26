@@ -25,8 +25,7 @@ REQUEST_PAGINATION_SIZE = 12
 MAX_SHOPIFY_ORDER_DATA = 10_000
 
 ELIGIBLE_ORDERS_QUERY = (
-    "name:1030 AND "
-    "(return_status:RETURNED OR return_status:IN_PROGRESS) AND "
+    "(return_status:IN_PROGRESS) AND "
     "(fulfillment_status:FULFILLED OR fulfillment_status:PARTIAL) AND "
     "(financial_status:PAID OR financial_status:PARTIALLY_PAID OR financial_status:PARTIALLY_REFUNDED) "
 )
@@ -197,7 +196,7 @@ def __process_orders_for_tracking(orders: list[ShopifyOrder]):
 
     if not orders:
         logger.info("No orders to process")
-        return  empty_entries
+        return empty_entries
 
     logger.info(f"Processing {len(orders)} orders for tracking")
     slack_notifier.send_info(f"Processing {len(orders)} orders for tracking")
@@ -210,7 +209,7 @@ def __process_orders_for_tracking(orders: list[ShopifyOrder]):
     if not cleaned_orders:
         logger.info("No eligible orders remain after cleanup")
         slack_notifier.send_info("No eligible orders found after filtering")
-        return  empty_entries
+        return empty_entries
 
     logger.info(
         f"Cleaned orders: {len(cleaned_orders)} eligible out of {len(orders)} total"

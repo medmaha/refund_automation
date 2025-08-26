@@ -134,10 +134,10 @@ class RefundLineItems(BaseModel):
     quantity: int
 
 
-class OrderRefunds(BaseModel):
+class Refund(BaseModel):
     createdAt: Optional[str] = Field(default=None)
     totalRefundedSet: Optional[MoneyBagSet] = Field(default=None)
-    refundLineItems: Optional[list[RefundLineItems]] = Field(default_factory=list)
+    refundLineItems: list[RefundLineItems] = Field(default_factory=list)
 
 
 class DiscountApplication(BaseModel):
@@ -170,10 +170,10 @@ class ShopifyOrder(BaseModel):
     totalRefundedShippingSet: MoneyBagSet
     discountApplications: List[dict] = Field(default_factory=list)
     suggestedRefund: SuggestedRefund
-    refunds: List[OrderRefunds]
-    returns: List[ReverseFulfillment]
-    disputes: List[OrderDispute]
-    transactions: List[OrderTransaction]
+    refunds: List[Refund] = Field(default_factory=list)
+    returns: List[ReverseFulfillment] = Field(default_factory=list)
+    disputes: List[OrderDispute] = Field(default_factory=list)
+    transactions: List[OrderTransaction] = Field(default_factory=list)
 
     return_id: Optional[str] = Field(default=None)
 

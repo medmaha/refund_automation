@@ -28,7 +28,6 @@ def exponential_backoff_retry(
     """
 
     def decorator(func: Callable) -> Callable:
-
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
             last_exception = None

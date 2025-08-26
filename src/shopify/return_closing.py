@@ -20,15 +20,13 @@ logger = get_logger(__name__)
     ]
 )
 def close_return(reverse_fulfillment: ReverseFulfillment):
-    variables = {
-        "returnId": reverse_fulfillment.id
-    }
-    
+    variables = {"returnId": reverse_fulfillment.id}
+
     response = requests.post(
         SHOPIFY_API_URL,
         headers=SHOPIFY_API_HEADERS,
         json={"query": RETURN_CLOSE_MUTATION, "variables": variables},
-        timeout=REQUEST_TIMEOUT
+        timeout=REQUEST_TIMEOUT,
     )
 
     response.raise_for_status()
@@ -42,10 +40,11 @@ def close_return(reverse_fulfillment: ReverseFulfillment):
 
     user_errors = data.get("userErrors", None)
     if user_errors:
-        raise ValueError(f"Error closing return {reverse_fulfillment.name}: {user_errors}")
-    
-    return data.get("return", None)
+        raise ValueError(
+            f"Error closing return {reverse_fulfillment.name}: {user_errors}"
+        )
 
+    return data.get("return", None)
 
 
 def close_processed_returns(
@@ -66,17 +65,25 @@ def close_processed_returns(
     with ThreadPoolExecutor(max_workers=3) as executor:
         # Submit tasks and get futures
         future_to_return = {
-            executor.submit(close_return, reverse_fulfillment=rf): rf for rf in open_returns
+            executor.submit(close_return, reverse_fulfillment=rf): (order.name, rf.name)
+            for rf in open_returns
         }
 
         # Process completed futures as they complete
         for future in as_completed(future_to_return):
-            reverse_fulfillment = future_to_return[future]
+            order_name, reverse_fulfillment_name = future_to_return[future]
             try:
                 result = future.result()
-                if not result:
-                    logger.error(f"Failed to close return: Order({order.name}) Return({reverse_fulfillment.name})")
+                if result:
+                    logger.info(
+                        f"Successfully closed return: Order({order_name}) Return({reverse_fulfillment_name})"
+                    )
                 else:
-                    logger.info(f"Successfully closed return: Order({order.name}) Return({reverse_fulfillment.name})")
+                    logger.error(
+                        f"Failed to close return: Order({order_name}) Return({reverse_fulfillment_name})"
+                    )
             except Exception as e:
-                logger.error(f"Exception occurred while closing return {reverse_fulfillment.name}", extra={"Error": str(e)})
+                logger.error(
+                    f"Exception occurred while closing: Order({order_name}) -> Return({reverse_fulfillment_name})",
+                    extra={"Error": str(e)},
+                )

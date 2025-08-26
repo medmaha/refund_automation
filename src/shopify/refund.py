@@ -10,7 +10,11 @@ from src.logger import get_logger
 from src.models.order import RefundCreateResponse, ReverseFulfillment, ShopifyOrder
 from src.models.tracking import TrackingData
 from src.shopify.orders import retrieve_refundable_shopify_orders
-from src.shopify.refund_calculator import refund_calculator
+from src.shopify.refund_calculator import (
+    RefundCalculationResult,
+    RefundCalculator,
+    refund_calculator,
+)
 from src.shopify.refund_mutation import execute_shopify_refund
 from src.shopify.refund_validator import validate_order_before_refund
 from src.shopify.return_closing import close_processed_returns
@@ -23,6 +27,7 @@ from src.utils.timezone import get_current_time_iso8601, timezone_handler
 logger = get_logger(__name__)
 
 EXECUTION_MODE = "LIVE" if not DRY_RUN else "DRY_RUN"
+
 
 def process_refund_automation():
     """Process fulfilled Shopify orders and handle refunds if eligible."""
@@ -67,13 +72,12 @@ def process_refund_automation():
     skipped_returns: list[ReverseFulfillment] = []
 
     for idx, order in enumerate(orders, start=1):
+        failed_returns = []
+        skipped_returns = []
+        refunded_returns = []
+
         logger.info(
-            f"Processing order {idx}/{len(orders)} - {order.name}",
-            extra={
-                "progress": f"{idx}/{len(orders)}",
-                "order_id": order.id,
-                "order_name": order.name,
-            },
+            f"Processing order {idx}/{len(orders)} - Order({order.name})",
         )
         extra_details = {
             "order_id": order.id,
@@ -101,7 +105,7 @@ def process_refund_automation():
             skipped_returns.extend(_skipped_returns)
             refunded_returns.extend(_refunded_returns)
 
-            if refunded_returns and not DRY_RUN:
+            if len(refunded_returns) > 0 and not DRY_RUN:
                 close_processed_returns(order, refunded_returns)
 
                 logger.info(
@@ -118,10 +122,10 @@ def process_refund_automation():
                         ),
                     }
                 )
-                
-            else:
+
+            elif not DRY_RUN:
                 logger.warning(
-                    f"Refund not processed for: Order({order.name})",
+                    f"Refund not processed for: Order({order.name}) Returns[{', '.join([rf.name for rf in refunded_returns])}]",
                     extra=extra_details,
                 )
 
@@ -227,9 +231,16 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
 
     try:
         valid_reverse_fulfillments = order.get_valid_return_shipment()
+        valid_reverse_fulfillments_count = len(valid_reverse_fulfillments)
 
         # Handle each refund independently
-        for reverse_fulfillment in valid_reverse_fulfillments:
+        for index, reverse_fulfillment in enumerate(
+            valid_reverse_fulfillments, start=1
+        ):
+            logger.info(
+                f"Processing refund {index}/{valid_reverse_fulfillments_count} - "
+                f"Return({reverse_fulfillment.name}) Order({order.name})",
+            )
             tracking = get_reverse_fulfillment_tracking_details(
                 reverse_fulfillment, trackings
             )
@@ -462,10 +473,15 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
                     request_id=request_id,
                 )
 
-            if refund:                    
+            if refund:
+                update_order_attributes(
+                    order, reverse_fulfillment, refund_calculation, refund
+                )
+
                 reverse_fulfillment.returned_amount = (
                     refund.totalRefundedSet.presentmentMoney.amount
                 )
+
                 refunded_reverse_fulfillments.append(reverse_fulfillment)
 
                 log_refund_audit(
@@ -513,10 +529,11 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
                     operation="refund",
                     result={
                         "order_id": order.id,
-                        "return_id": reverse_fulfillment.id,
+                        "order_name": order.name,
+                        "return": reverse_fulfillment.id,
+                        "refund_name": reverse_fulfillment.name,
                         "refund_id": refund.id,
                         "request_id": request_id,
-                        "order_name": order.name,
                         "tracking_number": tracking_number,
                         "variables": variables,
                         **refund_calculation.model_dump(
@@ -571,6 +588,59 @@ def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
         errored_reverse_fulfillments,
     )
 
+
+def update_order_attributes(
+    order: ShopifyOrder,
+    reverse_fulfillment: ReverseFulfillment,
+    refund_calculation: RefundCalculationResult,
+    refund: RefundCreateResponse,
+):
+    """Update the refund amount for tracking subsequent refund operations"""
+
+    try:
+        order.totalRefundedShippingSet.presentmentMoney.amount += refund_calculation.shipping_refund
+
+        refunded_amount = refund.totalRefundedSet.presentmentMoney.amount
+        for order_refund in order.refunds:
+            if (
+                order_refund.createdAt
+                or order_refund.totalRefundedSet.presentmentMoney.amount
+            ):
+                continue
+
+            refunded_line_items_ids = [
+                refunded_line_item.lineItem.get("id")
+                for refunded_line_item in order_refund.refundLineItems
+            ]
+
+            breaked = False
+            for _line_item in reverse_fulfillment.returnLineItems:
+                return_line_item_id = _line_item.fulfillmentLineItem.lineItem.get("id")
+
+                if not return_line_item_id in refunded_line_items_ids:
+                    continue
+
+                order_refund.totalRefundedSet.presentmentMoney.amount = refunded_amount
+                order_refund.createdAt = timezone_handler.get_current_time_store().__str__()
+                breaked = True
+                break
+
+            if breaked:
+                break
+
+        # Remove the processed return from the list of pending returns
+        order.returns = [rf for rf in order.returns if rf.id != reverse_fulfillment.id]
+    
+    except Exception as e:
+        logger.warning(
+            f"Failed updating attributes for: Order({order.name})",
+            extra={
+                "refund": refund.id,
+                "order_name": order.name,
+                "return_name": reverse_fulfillment.name,
+                "error_type": type(e).__name__,
+            }
+        )
 
 def get_reverse_fulfillment_tracking_details(
     reverse_fulfillment: ReverseFulfillment, trackings: list[TrackingData]

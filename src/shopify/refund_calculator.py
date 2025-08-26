@@ -1,7 +1,7 @@
 from decimal import ROUND_DOWN, Decimal
 from typing import Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.config import REFUND_FULL_SHIPPING, REFUND_PARTIAL_SHIPPING
 from src.logger import get_logger
@@ -28,6 +28,7 @@ class RefundCalculationResult(BaseModel):
     discount_deduction: float = 0.0
     prior_refund: float = 0.0
     order_total: float = 0.0
+    is_last_partial: bool = Field(default=False)
 
     full_return_shipping: Optional[str]
     partial_return_shipping: Optional[str]
@@ -58,7 +59,7 @@ class RefundCalculator:
 
         Args:
             order: ShopifyOrder containing all order data
-            tracking: Optional tracking information
+            reverse_fulfillment: ReverseFulfillment containing return data
 
         Returns:
             RefundCalculationResult with calculated amounts and line items
@@ -69,12 +70,15 @@ class RefundCalculator:
 
         if not returned_line_items:
             # Default to full refund if no return line items are specified
+            self.logger.info(f"Calculating full refund fo: Order{order.name} Refund({reverse_fulfillment.name})")
             return self._calculate_full_refund(order)
 
         if self._is_full_return(order, returned_line_items):
+            self.logger.info(f"Calculating full refund fo: Order{order.name} Refund({reverse_fulfillment.name})")
             return self._calculate_full_refund(order)
         else:
-            return self._calculate_partial_refund(order, returned_line_items)
+            self.logger.info(f"Calculating partial refund fo: Order{order.name} Refund({reverse_fulfillment.name})")
+            return self._calculate_partial_refund(order, reverse_fulfillment, returned_line_items)
 
     def _get_returned_line_items(
         self, order: ShopifyOrder, reverse_fulfillment: ReverseFulfillment
@@ -129,12 +133,119 @@ class RefundCalculator:
 
         return True
 
+    def is_last_partial_refund(self, order: ShopifyOrder, reverse_fulfillment: ReverseFulfillment) -> bool:
+        """
+        Determine if this reverse_fulfillment is the last partial return possible for this order.        
+        """
+        # Get the quantities being returned in this reverse fulfillment
+        current_return_qty_map = {}
+        for return_item in reverse_fulfillment.returnLineItems:
+            line_item_id = return_item.fulfillmentLineItem.lineItem.get("id")
+            if line_item_id:
+                current_return_qty_map[line_item_id] = (
+                    current_return_qty_map.get(line_item_id, 0) + return_item.refundableQuantity
+                )
+
+        # Calculate total quantities already refunded (from past refunds)
+        refunded_qty_map = {}
+        for refund in order.refunds:
+            # Only count processed refunds (those with creation date and amount)
+            if not refund.createdAt or not refund.totalRefundedSet or not refund.totalRefundedSet.presentmentMoney.amount:
+                continue
+                
+            for refund_line_item in refund.refundLineItems:
+                line_item_id = refund_line_item.lineItem.get("id")
+                if line_item_id:
+                    refunded_qty_map[line_item_id] = (
+                        refunded_qty_map.get(line_item_id, 0) + refund_line_item.quantity
+                    )
+
+        # Calculate total quantities from other pending returns (excluding current one)
+        other_pending_returns_qty_map = {}
+        for other_return in order.returns:
+
+            # Skip the current return we're processing
+            if other_return.id == reverse_fulfillment.id:
+                continue
+                
+            # Only consider open returns with return line items
+            if other_return.status != "OPEN" or not other_return.returnLineItems:
+                continue
+                
+            for return_item in other_return.returnLineItems:
+                line_item_id = return_item.fulfillmentLineItem.lineItem.get("id")
+                if line_item_id:
+                    other_pending_returns_qty_map[line_item_id] = (
+                        other_pending_returns_qty_map.get(line_item_id, 0) + return_item.refundableQuantity
+                    )
+
+        # Check if processing this return would exhaust all remaining refundable quantities
+        for line_item in order.lineItems:
+            line_item_id = line_item.id
+            original_qty = line_item.quantity
+            
+            already_refunded = refunded_qty_map.get(line_item_id, 0)
+            current_return_qty = current_return_qty_map.get(line_item_id, 0)
+            other_pending_qty = other_pending_returns_qty_map.get(line_item_id, 0)
+            
+            # Calculate remaining quantity after this refund
+            remaining_qty = original_qty - already_refunded - current_return_qty
+            
+            # If there are remaining quantities and other pending returns, this is not the last
+            if remaining_qty > 0 and other_pending_qty > 0:
+                self.logger.debug(
+                    f"Line item {line_item_id}: original={original_qty}, "
+                    f"refunded={already_refunded}, current_return={current_return_qty}, "
+                    f"other_pending={other_pending_qty}, remaining={remaining_qty} - Not last partial"
+                )
+                return False
+                
+            # If there are remaining quantities but no other pending returns, 
+            # and we're not returning everything in this batch, it's not the last
+            if remaining_qty > 0 and other_pending_qty == 0:
+                self.logger.debug(
+                    f"Line item {line_item_id}: has remaining qty {remaining_qty} "
+                    f"but no other pending returns - Not last partial"
+                )
+                return False
+
+        self.logger.info(
+            f"Determined this is the last partial return for order {order.name}, "
+            f"return {reverse_fulfillment.id}"
+        )
+        return True
+
+    def _calculate_remaining_refundable_amounts(self, order: ShopifyOrder) -> tuple[Decimal, Decimal]:
+        """
+        Calculate the remaining refundable amounts for the order.
+        
+        Returns:
+            tuple: (remaining_total_amount, remaining_shipping_amount)
+        """
+        original_total = Decimal(str(order.totalPriceSet.presentmentMoney.amount))
+        original_shipping = Decimal(str(order.totalShippingPriceSet.presentmentMoney.amount))
+        
+        prior_total_refunded = Decimal(str(order.priorRefundAmount))
+        prior_shipping_refunded = Decimal(str(order.totalRefundedShippingSet.presentmentMoney.amount))
+        
+        remaining_total = original_total - prior_total_refunded
+        remaining_shipping = original_shipping - prior_shipping_refunded
+        
+        # Ensuring non-negative
+        remaining_total = max(remaining_total, Decimal('0'))
+        remaining_shipping = max(remaining_shipping, Decimal('0'))
+        
+        self.logger.debug(
+            f"Remaining refundable amounts - Total: {remaining_total}, Shipping: {remaining_shipping}"
+        )
+        
+        return remaining_total, remaining_shipping
+
     def _calculate_full_refund(self, order: ShopifyOrder) -> RefundCalculationResult:
         """
         Calculate full refund - return exactly what customer paid back to original payment methods.
         Business Rule B1: Full Return → Full Original Amount
         """
-        self.logger.info(f"Calculating full refund for order {order.name}")
 
         # For full refund, refund all line items with their full quantities
         refund_line_items = [
@@ -172,13 +283,12 @@ class RefundCalculator:
         )
 
     def _calculate_partial_refund(
-        self, order: ShopifyOrder, returned_line_items: List[ReturnLineItem]
+        self, order: ShopifyOrder, reverse_fulfillment: ReverseFulfillment, returned_line_items: List[ReturnLineItem]
     ) -> RefundCalculationResult:
         """
         Calculate partial refund with proportional amounts.
         Business Rule B2: Partial Return → Proportional Refund
         """
-        self.logger.info(f"Calculating partial refund for order {order.name}")
 
         # Create mapping of returned quantities by line item ID
         returned_qty_map = {}
@@ -213,46 +323,54 @@ class RefundCalculator:
                 total_line_item_refund += line_item_refund
                 returned_line_items_data.append((order_line_item, return_line_item))
 
-        # Calculate proportional shipping refund
-        prior_refund = Decimal(str(order.priorRefundAmount))
-        original_shipping = Decimal(
-            str(order.totalShippingPriceSet.presentmentMoney.amount)
-        )
+        prior_refund_amount = Decimal(str(order.priorRefundAmount))
 
         if not REFUND_PARTIAL_SHIPPING:
             shipping_refund = Decimal("0")
         else:
-            prior_shipping = Decimal(str(order.totalRefundedShippingSet.presentmentMoney.amount))
             shipping_refund = self._calculate_proportional_shipping_refund(
                 order, returned_line_items_data
             )
 
-            if prior_shipping:
-                remaining_shipping = max(Decimal("0"), original_shipping - prior_shipping)
-                shipping_refund = min(remaining_shipping, shipping_refund)
-                
-                # Ensure total refunded shipping matches original if amounts are close
-                if abs((shipping_refund + prior_shipping) - original_shipping) < Decimal("0.01"):
-                    shipping_refund = original_shipping - prior_shipping
-                    
-                self.logger.debug(
-                    f"Capped shipping refund to {shipping_refund} "
-                    f"(original: {original_shipping}, "
-                    f"prior: {prior_shipping}, "
-                    f"remaining: {remaining_shipping})"
-                )
-
         # Calculate proportional tax refund
         tax_refund = self._calculate_proportional_tax_refund(returned_line_items_data)
 
-        # Total refund amount
-        total_refund_amount = float(
-            (float(total_line_item_refund) + float(shipping_refund) + float(tax_refund))
+        # Initial total refund amount
+        total_refund_amount = (
+            total_line_item_refund + shipping_refund + tax_refund
         )
+
+        # Determine if this is the last partial refund
+        is_last_partial = self.is_last_partial_refund(order, reverse_fulfillment)
+
+        # If this is the last partial refund, cap the amounts to remaining refundable amounts
+        if is_last_partial:
+            remaining_total, remaining_shipping = self._calculate_remaining_refundable_amounts(order)
+            
+            self.logger.info(
+                f"Last partial refund detected for order {order.name}. "
+                f"Calculated: {total_refund_amount}, Remaining: {remaining_total}"
+            )
+            
+            # Cap the total refund to remaining amount
+            if total_refund_amount != remaining_total:
+                self.logger.warning(
+                    f"Capping total refund from {total_refund_amount} to {remaining_total} "
+                    f"for last partial refund"
+                )
+                total_refund_amount = remaining_total
+            
+            # Cap the shipping refund to remaining shipping amount
+            if REFUND_PARTIAL_SHIPPING and shipping_refund != remaining_shipping:
+                self.logger.warning(
+                    f"Capping shipping refund from {shipping_refund} to {remaining_shipping} "
+                    f"for last partial refund"
+                )
+                shipping_refund = remaining_shipping
 
         # Calculate proportional transactions
         transactions = self._calculate_proportional_transactions(
-            order, total_refund_amount, prior_refund
+            order, total_refund_amount, prior_refund_amount
         )
 
         return RefundCalculationResult(
@@ -264,6 +382,7 @@ class RefundCalculator:
             order_total=self.__normalize_amount(order.totalPriceSet.presentmentMoney.amount),
             line_items_to_refund=refund_line_items,
             transactions=transactions,
+            is_last_partial=is_last_partial,
         )
 
     def _calculate_line_item_proportional_refund(
@@ -549,9 +668,6 @@ class RefundCalculator:
                     )
                     continue
 
-        self.logger.info(
-            f"Partial refund total tax calculated: LineItem({order_line_item.id}): {total_tax_refund}"
-        )
         return total_tax_refund
 
     def _calculate_full_total_tax_refund(
@@ -598,7 +714,6 @@ class RefundCalculator:
                     )
                     continue
 
-        self.logger.info(f"Full refund total tax calculated: {total_tax_refund}")
         return total_tax_refund
 
     def _calculate_proportional_transactions(
@@ -611,7 +726,7 @@ class RefundCalculator:
 
         # Calculate the proportion of the refund relative to the original order
         original_amount = Decimal(str(order.totalPriceSet.presentmentMoney.amount))
-        refund_amount_decimal = Decimal(str(float(refund_amount) + float(prior_refund)))
+        refund_amount_decimal = Decimal(refund_amount + prior_refund)
 
         if original_amount == 0:
             return []

@@ -15,37 +15,6 @@ dependencies = [
   "pytest-cov>=6.2.1",
 ]
 
-[tool.coverage.run]
-source = ["src"]
-omit = ["src/tests/*", "*/test_*", "*/__init__.py", "src/config.py"]
-
-[tool.coverage.report]
-show_missing = false
-skip_covered = false
-fail_under = 80
-exclude_lines = [
-  "pragma: no cover",
-  "def __repr__",
-  "if self.debug:",
-  "if settings.DEBUG",
-  "raise AssertionError",
-  "raise NotImplementedError",
-  "if 0:",
-  "if __name__ == .__main__.:",
-  "class .*\\bProtocol\\):",
-  "@(abc\\.)?abstractmethod",
-]
-
-[tool.coverage.html]
-directory = ".htmlcov"
-
-[tool.pytest.ini_options]
-addopts = [
-  "--cov=src",
-  "--cov-report=term-missing",
-  "--cov-report=html",
-  "--cov-fail-under=40",
-]
 
 [tool.ruff]
 # Exclude a variety of commonly ignored directories.
@@ -59,7 +28,7 @@ exclude = [
   ".venv",
   ".vscode",
   "__pypackages__",
-  "test",
+  "tests",
 ]
 
 line-length = 88

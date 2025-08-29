@@ -56,7 +56,7 @@ Every decision is logged with:
 
 ## 🏗️ Architecture
 
-```
+```text
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   Shopify API   │◄──►│  Refund Engine   │◄──►│   17TRACK API   │
 │   (GraphQL)     │    │                  │    │  (REST API)     │
@@ -125,7 +125,7 @@ Every decision is logged with:
 
 ## 📁 Project Structure
 
-```
+```text
 refund-automation/
 ├── src/
 │   ├── config.py              # Configuration management
@@ -164,7 +164,7 @@ refund-automation/
 
 ### 3. Refund Processing
 
-- Validates that returned items have `status: DELIVERED` and `sub_status: DELIVERED_OTHER`
+- Validates that returned items have `status: DELIVERED` and `sub_status: Delivered_Other`
 - Automatically calculates refund amounts based on original transactions
 - Creates refunds via Shopify GraphQL API with comprehensive error handling
 
@@ -301,4 +301,4 @@ If you encounter any issues or have questions:
 
 ---
 
-**Made with ❤️ by Primeforge West Ltd**
+### Made with ❤️ by Primeforge West Ltd

@@ -175,11 +175,15 @@ class ShopifyOrder(BaseModel):
     disputes: List[OrderDispute] = Field(default_factory=list)
     transactions: List[OrderTransaction] = Field(default_factory=list)
 
-    return_id: Optional[str] = Field(default=None)
+    priorRefundAmount: Optional[float] = Field(default=0.0)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        # self.__filter_out_already_refunded_return_line_items()
+
+        for refund in self.refunds:
+            amount = refund.totalRefundedSet.presentmentMoney.amount
+            if refund.createdAt and amount is not None:
+                self.priorRefundAmount += amount
 
     def __str__(self):
         return (
@@ -191,27 +195,15 @@ class ShopifyOrder(BaseModel):
 
     @property
     def tracking_number(self):
-        # TODO Clear all occurrences
+        # TODO Clear all references
         return "DUMMY_TRACKING_NUMBER"
 
-    @property
-    def priorRefundAmount(self):
-        total = 0.0
-        for refund in self.refunds:
-            amount = refund.totalRefundedSet.presentmentMoney.amount
-            if refund.createdAt and amount is not None:
-                total += amount
-        return total
+    def update_prior_refund_amount(self, amount: float):
+        self.priorRefundAmount += float(amount)
 
     def get_valid_return_shipment(self):
         """
         Helper method to get the all valid return shipment from the order.
-
-        Returns:
-            List[ReverseFulfillment]: A list of valid return fulfillments that have:
-                - An "OPEN" status
-                - Return line items
-                - Reverse fulfillment orders with tracking numbers
         """
 
         valid_return_fulfillments: list[ReverseFulfillment] = []
@@ -228,57 +220,3 @@ class ShopifyOrder(BaseModel):
                             valid_return_fulfillments.append(return_fulfillment)
 
         return valid_return_fulfillments
-
-    def __filter_out_already_refunded_return_line_items(self):
-        """
-        Filters out return line items that have already been fully refunded.
-        It iterates through the refunds and return fulfillments of the order,
-        adjusting the quantities of return line items based on the refunded quantities.
-        """
-
-        refunded_line_item_quantities = {}
-
-        for refund in self.refunds:
-            # Skip refunds that don't have a creation date or a refunded amount.
-            # This values are available only when refunds are actually made
-            if (
-                not refund.createdAt
-                or not refund.totalRefundedSet.presentmentMoney.amount
-            ):
-                # This refund was not process
-                continue
-
-            for refund_line_item in refund.refundLineItems:
-                line_item_id = refund_line_item.lineItem["id"]
-                refunded_quantity = refund_line_item.quantity
-
-                # Update the refunded quantity in the dictionary.
-                if line_item_id in refunded_line_item_quantities:
-                    refunded_line_item_quantities[line_item_id] += refunded_quantity
-                else:
-                    refunded_line_item_quantities[line_item_id] = refunded_quantity
-
-        for return_fulfillment in self.returns:
-            if not return_fulfillment.status == "OPEN":
-                return_fulfillment.returnLineItems = []
-                continue
-
-            return_line_items = []
-
-            # Iterate through each return line item in the return fulfillment.
-            for return_line_item in return_fulfillment.returnLineItems:
-                line_item_id = return_line_item.fulfillmentLineItem.lineItem["id"]
-                return_quantity = return_line_item.quantity
-
-                # Get the refunded quantity for the line item from the dictionary.
-                refunded_quantity = refunded_line_item_quantities.get(line_item_id, 0)
-                if refunded_quantity >= return_quantity:
-                    continue
-                elif refunded_quantity > 0:
-                    return_line_item.quantity = return_quantity - refunded_quantity
-                    refunded_line_item_quantities[line_item_id] = return_quantity
-
-                return_line_items.append(return_line_item)
-
-            # Update the return fulfillment's return line items with the filtered list.
-            return_fulfillment.returnLineItems = return_line_items

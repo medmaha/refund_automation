@@ -48,12 +48,11 @@ def close_return(reverse_fulfillment: ReverseFulfillment):
 
 
 def close_processed_returns(
-    order: ShopifyOrder, reverse_fulfilments: list[ReverseFulfillment]
+    order: ShopifyOrder, reverse_fulfillments: list[ReverseFulfillment]
 ):
-    open_returns = [rf for rf in reverse_fulfilments if rf.status == "OPEN"]
-    return_ids = [rf.name for rf in open_returns]
+    return_ids = [rf.name for rf in reverse_fulfillments]
 
-    if not open_returns:
+    if not reverse_fulfillments:
         logger.info(f"No open returns to close for Order({order.name})")
         return
 
@@ -61,18 +60,21 @@ def close_processed_returns(
         f"Closing Returns for Order({order.name}) Returns[{', '.join(return_ids)}]"
     )
 
-    # Use ThreadPoolExecutor to process refunds in parallel with proper error handling
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        # Submit tasks and get futures
-        future_to_return = {
-            executor.submit(close_return, reverse_fulfillment=rf): (order.name, rf.name)
-            for rf in open_returns
-        }
+    try:
+        # Use ThreadPoolExecutor to process refunds in parallel with proper error handling
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            # Submit tasks and get futures
+            future_to_return = {
+                executor.submit(close_return, reverse_fulfillment=rf): (
+                    order.name,
+                    rf.name,
+                )
+                for rf in reverse_fulfillments
+            }
 
-        # Process completed futures as they complete
-        for future in as_completed(future_to_return):
-            order_name, reverse_fulfillment_name = future_to_return[future]
-            try:
+            # Process completed futures as they complete
+            for future in as_completed(future_to_return):
+                order_name, reverse_fulfillment_name = future_to_return[future]
                 result = future.result()
                 if result:
                     logger.info(
@@ -82,8 +84,8 @@ def close_processed_returns(
                     logger.error(
                         f"Failed to close return: Order({order_name}) Return({reverse_fulfillment_name})"
                     )
-            except Exception as e:
-                logger.error(
-                    f"Exception occurred while closing: Order({order_name}) -> Return({reverse_fulfillment_name})",
-                    extra={"Error": str(e)},
-                )
+    except Exception as e:
+        logger.error(
+            f"Exception occurred while closing: Order({order_name}) -> Return({reverse_fulfillment_name})",
+            extra={"Error": str(e)},
+        )

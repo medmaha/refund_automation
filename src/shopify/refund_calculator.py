@@ -75,6 +75,7 @@ class RefundCalculationResult(BaseModel):
     partial_return_shipping: Optional[str] = None
     line_items_to_refund: List[Dict]
     transactions: List[Dict]
+    currency: str
 
     def __init__(self, **kwargs):
         kwargs.setdefault(
@@ -161,6 +162,7 @@ class RefundCalculator:
             line_items_to_refund=refund_line_items,
             transactions=transactions,
             is_last_partial=is_last_partial,
+            currency=order.totalPriceSet.presentmentMoney.currencyCode,
         )
 
     def _get_order_financials(self, order: ShopifyOrder) -> OrderFinancials:
@@ -473,7 +475,7 @@ class RefundCalculator:
                 {
                     "orderId": order.id,
                     "parentId": transaction.parentTransaction.id,
-                    "kind": "REFUND",
+                    "kind": TransactionKind.REFUND,
                     "gateway": transaction.gateway,
                     "amount": self._normalize_amount(refund_amount),
                 }
@@ -490,7 +492,8 @@ class RefundCalculator:
 
         for li in reverse_fulfillment.returnLineItems:
             original_qty = li.fulfillmentLineItem.lineItem.get("quantity", 0)
-            if li.refundableQuantity <= original_qty:
+            refundable_qty = li.refundableQuantity
+            if refundable_qty > 0 and refundable_qty <= original_qty:
                 returned_items.append(li)
 
         return returned_items
@@ -605,6 +608,7 @@ class RefundCalculator:
                 "quantity": refund.refund_quantity,
             }
             for refund in line_item_refunds
+            if refund.refund_quantity
         ]
 
     def _normalize_amount(

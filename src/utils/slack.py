@@ -31,7 +31,6 @@ class SlackNotifier:
         self, message: str, level: str, details: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Format message for Slack."""
-        mode_indicator = "(DRY-RUN)" if DRY_RUN else "(LIVE)"
         timestamp = datetime.now().isoformat()
 
         # Color coding based on level
@@ -134,17 +133,16 @@ class SlackNotifier:
         failed_refunds: int,
         skipped_refunds: int,
         total_amount: float,
-        currency: str,
+        retry_attempts: int
     ):
         """Send a summary of refund processing."""
-        message = f"Refund processing completed:"
+        message = "Refund processing completed:"
         details = {
             "Successful Refunds": successful_refunds,
             "Failed Refunds": failed_refunds,
             "Skipped Refunds": skipped_refunds,
-            "Total Refunded": (
-                f"{total_amount:.2f} {currency}" if successful_refunds > 0 else "0"
-            ),
+            "Retry Attempts": retry_attempts,
+            "Total Refunded": (f"{total_amount:.2f}"),
             "Mode": "DRY-RUN" if DRY_RUN else "LIVE",
         }
 

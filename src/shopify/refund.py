@@ -1,5 +1,6 @@
 import sys
 import uuid
+from dataclasses import dataclass
 
 from src.config import (
     DRY_RUN,
@@ -7,12 +8,16 @@ from src.config import (
     REFUND_PARTIAL_SHIPPING,
 )
 from src.logger import get_logger
-from src.models.order import RefundCreateResponse, ReverseFulfillment, ShopifyOrder
+from src.models.order import (
+    Refund,
+    RefundCreateResponse,
+    ReverseFulfillment,
+    ShopifyOrder,
+)
 from src.models.tracking import TrackingData
 from src.shopify.orders import retrieve_refundable_shopify_orders
 from src.shopify.refund_calculator import (
     RefundCalculationResult,
-    RefundCalculator,
     refund_calculator,
 )
 from src.shopify.refund_mutation import execute_shopify_refund
@@ -29,21 +34,47 @@ logger = get_logger(__name__)
 EXECUTION_MODE = "LIVE" if not DRY_RUN else "DRY_RUN"
 
 
-def process_refund_automation():
+@dataclass
+class Summary:
+    mode = EXECUTION_MODE
+    failed_refunds = 0
+    skipped_refunds = 0
+    successful_refunds = 0
+    total_refunded_amount = 0
+
+    @property
+    def total_count(self):
+        return self.successful_refunds + self.skipped_refunds + self.failed_refunds
+
+
+def process_refund_automation(max_retry=2, retry_count=0, summary: Summary = None):
     """Process fulfilled Shopify orders and handle refunds if eligible."""
 
     # Log timezone information
     tz_info = timezone_handler.get_timezone_info()
-    logger.info(
-        f"Starting refund automation in {EXECUTION_MODE} mode",
-        extra={"mode": EXECUTION_MODE, "timezone_info": tz_info},
-    )
 
-    # Send startup notification
-    slack_notifier.send_info(
-        "Refund automation starting",
-        details={"timezone:": f"\t{tz_info['store_timezone']}"},
-    )
+    automation_summary = summary or Summary()
+
+    if retry_count == 0:
+        logger.info(
+            f"Starting refund automation in {EXECUTION_MODE} mode",
+            extra={"mode": EXECUTION_MODE, "timezone_info": tz_info},
+        )
+        # Send startup notification
+        slack_notifier.send_info(
+            "Refund automation starting",
+            details={"timezone:": f"\t{tz_info['store_timezone']}"},
+        )
+    else:
+        logger.info(
+            f"Refund automation retry #{retry_count} for failed refunds",
+            extra={"mode": EXECUTION_MODE, "timezone_info": tz_info},
+        )
+        # Send retry notification
+        slack_notifier.send_info(
+            f"Refund automation retry #{retry_count}",
+            details={"timezone:": f"\t{tz_info['store_timezone']}"},
+        )
 
     try:
         orders, trackings = retrieve_refundable_shopify_orders()
@@ -51,43 +82,34 @@ def process_refund_automation():
         error_msg = f"Failed to retrieve Shopify orders: {e}"
         logger.error(error_msg, extra={"error": str(e)})
         slack_notifier.send_error(error_msg, details={"error": str(e)})
-        return sys.exit(1)
+        if retry_count == 0:
+            # If this is not a retry and we can't get orders, exit
+            return sys.exit(1)
 
     if not trackings:
         logger.warning(
             "No eligible tracking data found", extra={"trackings": len(trackings)}
         )
         slack_notifier.send_warning("No eligible orders found for refund processing")
-        return sys.exit(0)
-
-    # Initializing counters for summary
-    total_refunded_amount = 0.0
-    currency = "USD"
-    refunded_orders = {}
+        if retry_count == 0:
+            # If this is not a retry and no trackings, we're done
+            return sys.exit(0)
 
     logger.info(f"Processing {len(trackings)} orders for potential refunds")
 
+    # Move these outside the loop so they persist across orders
     refunded_returns: list[ReverseFulfillment] = []
     failed_returns: list[ReverseFulfillment] = []
     skipped_returns: list[ReverseFulfillment] = []
 
     for idx, order in enumerate(orders, start=1):
-        failed_returns = []
-        skipped_returns = []
-        refunded_returns = []
-
         logger.info(
             f"Processing order {idx}/{len(orders)} - Order({order.name})",
         )
+
         extra_details = {
             "order_id": order.id,
             "order_name": order.name,
-            "refunded_returns": ", ".join(
-                [refund.name for refund in refunded_returns] or ["N/A"]
-            ),
-            "skipped_returns": ", ".join(
-                [skipped_r.name for skipped_r in skipped_returns] or ["N/A"]
-            ),
             "full_return_shipping": (
                 "Policy OFF" if not REFUND_FULL_SHIPPING else "Policy ON"
             ),
@@ -95,6 +117,7 @@ def process_refund_automation():
                 "Policy OFF" if not REFUND_PARTIAL_SHIPPING else "Policy ON"
             ),
         }
+
         # Process refund with comprehensive error handling
         try:
             _refunded_returns, _skipped_returns, _failed_returns = refund_order(
@@ -105,34 +128,25 @@ def process_refund_automation():
             skipped_returns.extend(_skipped_returns)
             refunded_returns.extend(_refunded_returns)
 
-            if len(refunded_returns) > 0 and not DRY_RUN:
-                close_processed_returns(order, refunded_returns)
+            automation_summary.failed_refunds += len(_failed_returns)
+            automation_summary.skipped_refunds += len(_skipped_returns)
+            automation_summary.successful_refunds += len(_refunded_returns)
+            automation_summary.total_refunded_amount += sum(
+                [refund.returned_amount for refund in _refunded_returns]
+            )
 
+            if len(_refunded_returns) > 0 and not DRY_RUN:
+                close_processed_returns(order, _refunded_returns)
                 logger.info(
                     f"Successfully refunded Order({order.name})",
                     extra=extra_details,
                 )
-                extra_details.update(
-                    {
-                        "refunded_returns": ", ".join(
-                            [refund.name for refund in refunded_returns] or ["N/A"]
-                        ),
-                        "skipped_returns": ", ".join(
-                            [skipped_r.name for skipped_r in skipped_returns] or ["N/A"]
-                        ),
-                    }
-                )
 
             elif not DRY_RUN:
                 logger.warning(
-                    f"Refund not processed for: Order({order.name}) Returns[{', '.join([rf.name for rf in refunded_returns])}]",
+                    f"Refund not processed for: Order({order.name})",
                     extra=extra_details,
                 )
-
-            slack_notifier.send_success(
-                f"Refund processed completed for: Order({order.name})",
-                details=extra_details,
-            )
 
         except Exception as e:
             logger.error(
@@ -147,61 +161,41 @@ def process_refund_automation():
                 f"Failed to process refund for order {order.name}",
                 details={"order_id": order.id, "error": str(e)},
             )
+            # Count this as a failed refund
 
-    if not refunded_returns:
-        logger.warning(
-            "No refund processed",
-            extra={
-                "orders": len(orders),
-                "trackings": len(trackings),
-                "successful_refunds": len(refunded_returns),
-                "failed_refunds": len(failed_returns),
-                "skipped_refunds": len(skipped_returns),
-            },
+    # Retry logic
+
+    potential_fail_count = len(skipped_returns) + len(failed_returns)
+    if potential_fail_count > 0 and retry_count < max_retry:
+        new_retry_count = retry_count + 1
+        logger.info(
+            f"Retrying {len(failed_returns)} failed refunds (attempt {new_retry_count}/{max_retry})"
         )
-        slack_notifier.send_warning(
-            "No refund processed",
-            details={
-                "orders": len(orders),
-                "trackings": len(trackings),
-                "successful_refunds": len(refunded_returns),
-                "failed_refunds": len(failed_returns),
-                "skipped_refunds": len(skipped_returns),
-            },
+        return process_refund_automation(
+            max_retry=max_retry, retry_count=new_retry_count, summary=automation_summary
         )
-        return sys.exit(0)
 
-    # Log final summary
-    summary_msg = "Refund processing completed"
-
-    total_refunded_amount = sum([refund.returned_amount for refund in refunded_returns])
-
+    # Final summary
     logger.info(
-        summary_msg,
+        f"Refund processing completed for {automation_summary.total_count} items",
         extra={
-            "successful_refunds": len(refunded_returns),
-            "failed_refunds": len(failed_returns),
-            "skipped_refunds": len(skipped_returns),
-            "total_refunded_amount": f"{total_refunded_amount:.2f}",
-            "currency": currency,
-            "mode": EXECUTION_MODE,
+            "successful_refunds": automation_summary.successful_refunds,
+            "failed_refunds": automation_summary.failed_refunds,
+            "skipped_refunds": automation_summary.skipped_refunds,
+            "total_refunded_amount": f"{automation_summary.total_refunded_amount:.2f}",
+            "mode": automation_summary.mode,
+            "retry_attempts": retry_count,
         },
     )
 
     # Send summary Slack notification
     slack_notifier.send_refund_summary(
-        successful_refunds=len(refunded_returns),
-        failed_refunds=len(failed_returns),
-        skipped_refunds=len(skipped_returns),
-        total_amount=total_refunded_amount,
-        currency=currency,
+        successful_refunds=automation_summary.successful_refunds,
+        failed_refunds=automation_summary.failed_refunds,
+        skipped_refunds=automation_summary.skipped_refunds,
+        total_amount=automation_summary.total_refunded_amount,
+        retry_attempts=retry_count,
     )
-
-    if refunded_orders:
-        logger.debug(
-            "Detailed refund results",
-            extra={"refunded_orders": list(refunded_orders.keys())},
-        )
 
 
 def refund_order(order: ShopifyOrder, trackings=list[TrackingData]):
@@ -598,49 +592,55 @@ def update_order_attributes(
     """Update the refund amount for tracking subsequent refund operations"""
 
     try:
-        order.totalRefundedShippingSet.presentmentMoney.amount += refund_calculation.shipping_refund
-
+        refunded_line_items_ids = [
+            line_item_id
+            for line_item in refund_calculation.line_items_to_refund
+            if (line_item_id := line_item.get("lineItemId", None))
+        ]
+        corresponding_refund: Refund = next(
+            (
+                refund
+                for refund in order.refunds
+                for li in refund.refundLineItems
+                if not refund.createdAt
+                and li.lineItem.get("id") in refunded_line_items_ids
+            ),
+            None,
+        )
         refunded_amount = refund.totalRefundedSet.presentmentMoney.amount
-        for order_refund in order.refunds:
-            if (
-                order_refund.createdAt
-                or order_refund.totalRefundedSet.presentmentMoney.amount
-            ):
-                continue
 
-            refunded_line_items_ids = [
-                refunded_line_item.lineItem.get("id")
-                for refunded_line_item in order_refund.refundLineItems
-            ]
+        if corresponding_refund:
+            corresponding_refund.createdAt = (
+                timezone_handler.get_current_time_store().__str__()
+            )
+            corresponding_refund.totalRefundedSet.presentmentMoney.amount = (
+                refunded_amount
+            )
 
-            breaked = False
-            for _line_item in reverse_fulfillment.returnLineItems:
-                return_line_item_id = _line_item.fulfillmentLineItem.lineItem.get("id")
+        order.update_prior_refund_amount(amount=refunded_amount)
+        order.totalRefundedShippingSet.presentmentMoney.amount += (
+            refund_calculation.shipping_refund
+        )
+        order.totalRefundedShippingSet.presentmentMoney.currencyCode = (
+            refund_calculation.currency
+        )
 
-                if not return_line_item_id in refunded_line_items_ids:
-                    continue
+        for rf in order.returns:
+            if rf.id == reverse_fulfillment.id:
+                rf.status = "REFUNDED"
 
-                order_refund.totalRefundedSet.presentmentMoney.amount = refunded_amount
-                order_refund.createdAt = timezone_handler.get_current_time_store().__str__()
-                breaked = True
-                break
-
-            if breaked:
-                break
-
-        # Remove the processed return from the list of pending returns
-        order.returns = [rf for rf in order.returns if rf.id != reverse_fulfillment.id]
-    
     except Exception as e:
         logger.warning(
-            f"Failed updating attributes for: Order({order.name})",
+            f"Failed updating attributes for: Order({order.name}) Return({reverse_fulfillment.name})",
             extra={
                 "refund": refund.id,
                 "order_name": order.name,
                 "return_name": reverse_fulfillment.name,
                 "error_type": type(e).__name__,
-            }
+                "error_message": str(e),
+            },
         )
+
 
 def get_reverse_fulfillment_tracking_details(
     reverse_fulfillment: ReverseFulfillment, trackings: list[TrackingData]
@@ -651,10 +651,15 @@ def get_reverse_fulfillment_tracking_details(
     for rfo in reverse_fulfillment.reverseFulfillmentOrders:
         for reverse_delivery in rfo.reverseDeliveries:
             return_tracking_number = reverse_delivery.deliverable.tracking.number
-            tracking = next(
-                (t for t in trackings if t.number == return_tracking_number), None
-            )
+            tracking = get_tracking_by_number(return_tracking_number, trackings)
             if tracking:
                 return tracking
 
+    return None
+
+
+def get_tracking_by_number(number: str, trackings: list[TrackingData]):
+    for tracking in trackings:
+        if tracking.number == number:
+            return tracking
     return None

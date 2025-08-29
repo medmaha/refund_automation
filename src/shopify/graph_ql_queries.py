@@ -15,18 +15,14 @@ query ($first: Int, $after: String, $query: String) {
         id
         name
         tags
-        transactions {
-          id
-          kind
-          gateway
-          amountSet {
-            presentmentMoney {
-              amount
-            }
-            shopMoney {
-              amount
-              currencyCode
-            }
+        disputes {
+          status
+          initiatedAs
+        }
+        totalShippingPriceSet {
+          presentmentMoney {
+            amount
+            currencyCode
           }
         }
         suggestedRefund(
@@ -38,17 +34,6 @@ query ($first: Int, $after: String, $query: String) {
             presentmentMoney {
               amount
               currencyCode
-            }
-          }
-          refundDuties {
-            amountSet {
-              presentmentMoney {
-                amount
-                currencyCode
-              }
-            }
-            originalDuty {
-              id
             }
           }
           shipping {
@@ -69,15 +54,37 @@ query ($first: Int, $after: String, $query: String) {
             gateway
             kind
             parentTransaction {
-              id
+              id 
             }
           }
         }
         totalPriceSet {
-          shopMoney {
+          presentmentMoney {
             amount
             currencyCode
           }
+        }
+        transactions {
+          id
+          kind
+          gateway
+          amountSet {
+            presentmentMoney {
+              amount
+              currencyCode
+            }
+          }
+        }
+        discountApplications(first: 5) {
+          edges {
+            node {
+              allocationMethod
+              targetSelection
+              targetType
+            }
+          }
+        }
+        totalRefundedShippingSet {
           presentmentMoney {
             amount
             currencyCode
@@ -87,13 +94,10 @@ query ($first: Int, $after: String, $query: String) {
           nodes {
             id
             quantity
+            isGiftCard
             refundableQuantity
             originalTotalSet {
               presentmentMoney {
-                amount
-                currencyCode
-              }
-              shopMoney {
                 amount
                 currencyCode
               }
@@ -101,10 +105,6 @@ query ($first: Int, $after: String, $query: String) {
             discountAllocations {
               allocatedAmountSet {
                 presentmentMoney {
-                  amount
-                  currencyCode
-                }
-                shopMoney {
                   amount
                   currencyCode
                 }
@@ -118,10 +118,6 @@ query ($first: Int, $after: String, $query: String) {
                   amount
                   currencyCode
                 }
-                shopMoney {
-                  amount
-                  currencyCode
-                }
               }
             }
           }
@@ -129,27 +125,23 @@ query ($first: Int, $after: String, $query: String) {
         fulfillments {
           id
           name
-          totalQuantity
-          displayStatus
           requiresShipping
-          trackingInfo(first: 10) {
+          trackingInfo(first: 5) {
             number
             company
             url
           }
         }
-        returns(first: $first) {
+        returns(first: 10, query: "status:OPEN") {
           nodes {
             id
             name
             status
-            returnLineItems(first: 10) {
+            returnLineItems(first: 5) {
               nodes {
                 ... on ReturnLineItem {
                   id
                   quantity
-                  returnReason
-                  returnReasonNote
                   refundableQuantity
                   fulfillmentLineItem {
                     id
@@ -157,16 +149,7 @@ query ($first: Int, $after: String, $query: String) {
                       id
                       name
                       quantity
-                      originalTotalSet {
-                        presentmentMoney {
-                          amount
-                          currencyCode
-                        }
-                        shopMoney {
-                          amount
-                          currencyCode
-                        }
-                      }
+                      isGiftCard
                     }
                   }
                 }
@@ -199,13 +182,13 @@ query ($first: Int, $after: String, $query: String) {
               currencyCode
             }
           }
-          refundLineItems(first: 10) {
+          refundLineItems(first: 5) {
             nodes {
               lineItem {
                 id
+                isGiftCard
               }
               quantity
-              restockType
             }
           }
         }
@@ -224,7 +207,6 @@ mutation RefundLineItem($returnId: ID!) {
       closedAt
     }
     userErrors {
-      code
       field
       message
     }

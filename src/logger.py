@@ -5,8 +5,6 @@ from datetime import datetime, timezone
 
 from src.config import DRY_RUN
 
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-
 
 class ISO8601Formatter(logging.Formatter):
     """Custom formatter that uses ISO8601 timestamps with timezone."""
@@ -34,6 +32,10 @@ class ISO8601Formatter(logging.Formatter):
 
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_DEBUG_ONLY = os.getenv("LOG_DEBUG_ONLY", "false").lower() == "true"
+
+
 # Create the .logs dir if it does not exist
 LOG_DIR = ".logs"
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -45,10 +47,15 @@ class Logger(logging.Logger):
     def __init__(self, name, level=0):
         super().__init__(name, level)
 
-    def _log_with_extra(self, level, msg, *args, extra=None, **kwargs):
+    def _log_with_extra(self, level: int, msg: str, *args, **kwargs):
         """Internal method to handle extra fields."""
+
+        if LOG_DEBUG_ONLY and level in [logging.INFO]:
+            return
+
+        extra = kwargs.pop("extra", None)
+
         if extra:
-            # Create a copy to avoid modifying the original
             log_kwargs = kwargs.copy()
             log_kwargs["extra"] = {"extra_fields": extra}
             super()._log(level, msg, args, **log_kwargs)

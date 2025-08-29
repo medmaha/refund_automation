@@ -28,12 +28,11 @@ def exponential_backoff_retry(
     """
 
     def decorator(func: Callable) -> Callable:
-
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
             last_exception = None
 
-            for attempt in range(max_retries + 1):
+            for attempt, _ in enumerate(range(max_retries), start=1):
                 try:
                     return func(*args, **kwargs)
                 except exceptions as e:
@@ -44,7 +43,7 @@ def exponential_backoff_retry(
                             f"Function {func.__name__} failed after {max_retries} retries",
                             extra={
                                 "function": func.__name__,
-                                "attempt": attempt + 1,
+                                "attempt": attempt,
                                 "max_retries": max_retries,
                                 "exception": str(e),
                             },
@@ -59,10 +58,10 @@ def exponential_backoff_retry(
                         delay = delay * (0.5 + random.random() * 0.5)
 
                     logger.warning(
-                        f"Function {func.__name__} failed on attempt {attempt + 1}, retrying in {delay:.2f}s",
+                        f"Function {func.__name__} failed on attempt {attempt}, retrying in {delay:.2f}s",
                         extra={
                             "function": func.__name__,
-                            "attempt": attempt + 1,
+                            "attempt": attempt,
                             "max_retries": max_retries,
                             "delay": delay,
                             "exception": str(e),

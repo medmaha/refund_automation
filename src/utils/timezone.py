@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytz
 
@@ -23,6 +23,38 @@ class TimezoneHandler:
     def get_current_time_utc(self) -> datetime:
         """Get current time in UTC."""
         return datetime.now(timezone.utc)
+
+    def get_added_utc_time(
+        self, seconds: int = 0, minutes: int = 0, hours: int = 0, days: int = 0
+    ) -> datetime:
+        """Add time to current UTC time."""
+        return self.get_current_time_utc() + timedelta(
+            days=days, hours=hours, minutes=minutes, seconds=seconds
+        )
+
+    def get_subtracted_utc_time(
+        self, seconds: int = 0, minutes: int = 0, hours: int = 0, days: int = 0
+    ) -> datetime:
+        """Subtracts time to current UTC time."""
+        return self.get_current_time_utc() - timedelta(
+            days=days, hours=hours, minutes=minutes, seconds=seconds
+        )
+
+    def get_added_store_time(
+        self, seconds: int = 0, minutes: int = 0, hours: int = 0, days: int = 0
+    ) -> datetime:
+        """Add time to current store time."""
+        return self.get_current_time_store() + timedelta(
+            days=days, hours=hours, minutes=minutes, seconds=seconds
+        )
+
+    def get_subtracted_store_time(
+        self, seconds: int = 0, minutes: int = 0, hours: int = 0, days: int = 0
+    ) -> datetime:
+        """Subtract time from current store time."""
+        return self.get_current_time_store() - timedelta(
+            days=days, hours=hours, minutes=minutes, seconds=seconds
+        )
 
     def get_current_time_store(self) -> datetime:
         """Get current time in store timezone."""

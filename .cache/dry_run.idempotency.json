@@ -1,71 +1,37 @@
 {
-  "44518da58f875aea": {
-    "timestamp": "2025-08-13T10:22:46.017293-04:00",
-    "order_id": "gid://shopify/Order/5869002e",
+  "ee70ab977237f37b": {
+    "timestamp": "2025-08-18T07:23:20.959116-04:00",
+    "order_id": "gid://shopify/Order/6761296757048",
     "operation": "refund",
     "dry_run": true,
-    "result_id": "gid://shopify/Refund/gid://shopify/Order/5869002e-1755094966-dry-run-"
-  },
-  "0503e071538f91ec": {
-    "timestamp": "2025-08-13T10:22:46.735047-04:00",
-    "order_id": "gid://shopify/Order/1f146625",
-    "operation": "refund",
-    "dry_run": true,
-    "result_id": "gid://shopify/Refund/gid://shopify/Order/1f146625-1755094966-dry-run-"
-  },
-  "75e3934c7cbc54a3": {
-    "timestamp": "2025-08-13T10:22:46.802255-04:00",
-    "order_id": "gid://shopify/Order/a951eda2",
-    "operation": "refund",
-    "dry_run": true,
-    "result_id": "gid://shopify/Refund/12345"
-  },
-  "6742afb289631e8c": {
-    "timestamp": "2025-08-13T10:22:46.808962-04:00",
-    "order_id": "gid://shopify/Order/ae1844e6",
-    "operation": "refund",
-    "dry_run": true,
-    "result_id": "gid://shopify/Refund/gid://shopify/Order/ae1844e6-1755094966-dry-run-"
-  },
-  "5bfa220ab15fa835": {
-    "timestamp": "2025-08-13T10:22:47.375305-04:00",
-    "order_id": "gid://shopify/Order/47ccc7f8",
-    "operation": "refund",
-    "dry_run": true,
-    "result_id": "gid://shopify/Refund/gid://shopify/Order/47ccc7f8-1755094967-dry-run-"
-  },
-  "b2174bdd131d158f": {
-    "timestamp": "2025-08-13T10:22:47.939646-04:00",
-    "order_id": "gid://shopify/Order/ab90ad11",
-    "operation": "refund",
-    "dry_run": true,
-    "result_id": "gid://shopify/Refund/gid://shopify/Order/ab90ad11-1755094967-dry-run-"
-  },
-  "3afd5d534a5b92f2": {
-    "timestamp": "2025-08-13T10:22:53.389328-04:00",
-    "order_id": "gid://shopify/Order/5bfc809f",
-    "operation": "refund",
-    "dry_run": true,
-    "result_id": "gid://shopify/Refund/gid://shopify/Order/5bfc809f-1755094973-dry-run-"
-  },
-  "eefb384f4bf0e095": {
-    "timestamp": "2025-08-13T10:22:53.396332-04:00",
-    "order_id": "gid://shopify/Order/5bfc809f",
-    "operation": "refund",
-    "dry_run": true
-  },
-  "5f154f43967fd793": {
-    "timestamp": "2025-08-13T10:22:53.408021-04:00",
-    "order_id": "gid://shopify/Order/fc987bb1",
-    "operation": "refund",
-    "dry_run": true,
-    "result_id": "gid://shopify/Refund/12345"
-  },
-  "ededdf4d7c05500e": {
-    "timestamp": "2025-08-13T10:22:53.511218-04:00",
-    "order_id": "gid://shopify/Order/3c5f68e9",
-    "operation": "refund",
-    "dry_run": true,
-    "result_id": "gid://shopify/Refund/gid://shopify/Order/3c5f68e9-1755094973-dry-run-"
+    "result": {
+      "result_id": "gid://shopify/Refund/gid://shopify/Order/6761296757048-1755516200-dry-run-PARTIAL",
+      "results": {
+        "refund_type": "PARTIAL",
+        "total_refund_amount": 885.32,
+        "line_items_to_refund": [
+          {
+            "lineItemId": "gid://shopify/LineItem/17451492180280",
+            "quantity": 2
+          },
+          {
+            "lineItemId": "gid://shopify/LineItem/17451492213048",
+            "quantity": 1
+          }
+        ],
+        "transactions": [
+          {
+            "orderId": "gid://shopify/Order/6761296757048",
+            "parentId": "gid://shopify/OrderTransaction/8159429886264",
+            "kind": "REFUND",
+            "gateway": "manual",
+            "amount": 885.32
+          }
+        ],
+        "shipping_refund": 0.0,
+        "tax_refund": 115.47,
+        "discount_deduction": 0.0
+      }
+    }
   }
 }

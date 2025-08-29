@@ -3,7 +3,7 @@ import json
 import os
 from typing import Any, Dict, Optional
 
-from src.config import DRY_RUN
+from src.config import DRY_RUN, IDEMPOTENCY_SAVE_ENABLED
 from src.logger import get_logger
 from src.utils.timezone import get_current_time_iso8601
 
@@ -37,7 +37,11 @@ class IdempotencyManager:
 
     def _save_cache(self):
         """Save idempotency cache to file."""
-        save_cache_data(self)
+        if IDEMPOTENCY_SAVE_ENABLED:
+            save_cache_data(self)
+            return
+
+        logger.debug(f"Idempotency saving disabled, cache file: {self.cache_file}")
 
     def _cleanup_expired_entries(self):
         """Remove expired entries from cache."""
@@ -148,17 +152,12 @@ class IdempotencyManager:
         """
         entry = {
             "timestamp": get_current_time_iso8601(),
+            "ttl_hours": self.ttl_hours,
             "order_id": order_id,
             "operation": operation,
             "dry_run": DRY_RUN,
+            "result": result,
         }
-
-        if result is not None:
-            # Store serializable result info
-            if hasattr(result, "id"):
-                entry["result_id"] = str(result.id)
-            elif isinstance(result, dict) and "id" in result:
-                entry["result_id"] = str(result["id"])
 
         self._cache[idempotency_key] = entry
         self._save_cache()
@@ -221,7 +220,7 @@ class IdempotencyManager:
             Tuple of (idempotency_key, is_duplicate)
         """
         key = idempotency_manager.generate_key(order_id, operation, **kwargs)
-        is_duplicate = idempotency_manager.is_duplicate_operation(key)
+        is_duplicate = idempotency_manager.get_operation_result(key)
         return key, is_duplicate
 
 
@@ -229,11 +228,11 @@ def load_cache_data(instance: "IdempotencyManager"):
     """Load idempotency cache from file."""
 
     try:
-        with open(instance.cache_file, "r") as f:
-            instance._cache = json.load(f)
-            logger.debug(
-                f"Loaded idempotency cache with {len(instance._cache)} entries"
-            )
+        if os.path.exists(instance.cache_file):
+            with open(instance.cache_file, "r") as f:
+                instance._cache = json.load(f)
+        else:
+            instance._cache = {}
     except json.decoder.JSONDecodeError as e:
         logger.warning(f"Failed to load idempotency cache: {e}")
         instance._cache = {}

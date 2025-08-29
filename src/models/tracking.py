@@ -1,33 +1,83 @@
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
-class TrackingStatus(Enum):
-    NOTFOUND = "NotFound"
+class TrackingStatus(str, Enum):
+    NotFound = "NotFound"
+    Delivered = "Delivered"
+    InTransit = "InTransit"
     InfoReceived = "InfoReceived"
-    IN_TRANSIT = "InTransit"
     Expired = "Expired"
     AvailableForPickup = "AvailableForPickup"
     OutForDelivery = "OutForDelivery"
     DeliveryFailure = "DeliveryFailure"
-    DELIVERED = "Delivered"
     Exception = "Exception"
 
 
-class TrackingSubStatus(Enum):
-    IN_TRANSIT_OTHER = "InTransit"
-    NOTFOUND_OTHER = "NotFound_Other"
-    DELIVERED_OTHER = "Delivered_Other"
-    Exception_Returned = "Exception_Returned"
+class TrackingSubStatus(str, Enum):
+    # NotFound
+    NotFound_Other = "NotFound_Other"
+    NotFound_InvalidCode = "NotFound_InvalidCode"
+
+    # InfoReceived
+    InfoReceived = "InfoReceived"
+
+    # InTransit
+    InTransit_PickedUp = "InTransit_PickedUp"
+    InTransit_Other = "InTransit_Other"
+    InTransit_Departure = "InTransit_Departure"
+    InTransit_Arrival = "InTransit_Arrival"
+    InTransit_CustomsProcessing = "InTransit_CustomsProcessing"
+    InTransit_CustomsReleased = "InTransit_CustomsReleased"
+    InTransit_CustomsRequiringInformation = "InTransit_CustomsRequiringInformation"
+
+    # Expired
+    Expired_Other = "Expired_Other"
+
+    # AvailableForPickup
+    AvailableForPickup_Other = "AvailableForPickup_Other"
+
+    # OutForDelivery
+    OutForDelivery_Other = "OutForDelivery_Other"
+
+    # DeliveryFailure
+    DeliveryFailure_Other = "DeliveryFailure_Other"
+    DeliveryFailure_NoBody = "DeliveryFailure_NoBody"
+    DeliveryFailure_Security = "DeliveryFailure_Security"
+    DeliveryFailure_Rejected = "DeliveryFailure_Rejected"
+    DeliveryFailure_InvalidAddress = "DeliveryFailure_InvalidAddress"
+
+    # Delivered
+    Delivered_Other = "Delivered_Other"
+    Delivered_Signed = "Delivered_Signed"
+    Delivered_At_Locker = "Delivered_At_Locker"
+
+    # No Statuses
+    _None = None
+    _Empty = ""
+    _Null = "null"
+    _None_String = "None"
+
+    # Exception
+    Exception_Other = "Exception_Other"
     Exception_Returning = "Exception_Returning"
+    Exception_Returned = "Exception_Returned"
+    Exception_NoBody = "Exception_NoBody"
+    Exception_Security = "Exception_Security"
+    Exception_Damage = "Exception_Damage"
+    Exception_Rejected = "Exception_Rejected"
+    Exception_Delayed = "Exception_Delayed"
+    Exception_Lost = "Exception_Lost"
+    Exception_Destroyed = "Exception_Destroyed"
+    Exception_Cancel = "Exception_Cancel"
 
 
 class LatestStatus(BaseModel):
     status: Optional[TrackingStatus]
-    sub_status: Optional[TrackingSubStatus]
-    sub_status_descr: Optional[str]
+    sub_status: Optional[TrackingSubStatus] = Field(default=None)
+    sub_status_descr: Optional[str] = Field(default="")
 
 
 class LatestEvent(BaseModel):
@@ -46,15 +96,16 @@ class Milestone(BaseModel):
 
 
 class TrackInfo(BaseModel):
-    milestone: List[Milestone]
     latest_status: LatestStatus
-    latest_event: Optional[LatestEvent]
+    milestone: List[Milestone] = Field(default_factory=list)
+    latest_event: Optional[LatestEvent] = Field(default=None)
 
 
 class TrackingData(BaseModel):
-    tag: str
-    number: str
-    carrier: int
+    tag: Optional[str] = Field(default_factory=list)
+    carrier: Optional[int]
+    number: Optional[str]
+    carrier_disagreement: Optional[dict] = Field(default_factory=dict)
     track_info: Optional[TrackInfo]
 
     def __str__(self):
@@ -62,3 +113,7 @@ class TrackingData(BaseModel):
 
     def __repr__(self):
         return f"TrackingData(number={self.number}, carrier={self.carrier})"
+
+    @property
+    def is_carrier_disagreement(self):
+        return bool(self.tag) and ("carrier_mismatch" in self.tag)

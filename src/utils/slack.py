@@ -25,25 +25,25 @@ class SlackNotifier:
         self.channel = SLACK_CHANNEL
         self.enabled = SLACK_ENABLED and self.webhook_url
         self.automation_id = AUTOMATION_ID
+        self.notify_slack_disabled = False
 
     def _format_message(
         self, message: str, level: str, details: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Format message for Slack."""
-        mode_indicator = "(DRY-RUN)" if DRY_RUN else "(LIVE)"
         timestamp = datetime.now().isoformat()
 
         # Color coding based on level
         colors = {
-            "info": "#36a64f",  # Green
+            "info": "##808080",  # Gray
             "warning": "#ff9500",  # Orange
             "error": "#ff0000",  # Red
             "success": "#36a64f",  # Green
         }
 
         attachment = {
-            "color": colors.get(level, "#808080"),
-            "title": f"Refund Automation Alert ({self.automation_id}) {mode_indicator}",
+            "color": colors.get(level, colors["info"]),
+            "title": f"Automation Alert ({self.automation_id})",
             "text": message,
             "timestamp": timestamp,
             "fields": [],
@@ -62,11 +62,18 @@ class SlackNotifier:
             "attachments": [attachment],
         }
 
+    def __notify_slack_disabled(self):
+        if self.notify_slack_disabled:
+            return
+
+        self.notify_slack_disabled = True
+        logger.debug("Slack notifications disabled, skipping")
+
     @exponential_backoff_retry(exceptions=(requests.exceptions.RequestException,))
     def _send_to_slack(self, payload: Dict[str, Any]) -> bool:
         """Send payload to Slack webhook."""
         if not self.enabled:
-            logger.debug("Slack notifications disabled, skipping")
+            self.__notify_slack_disabled()
             return False
 
         if not self.webhook_url:
@@ -124,17 +131,18 @@ class SlackNotifier:
         self,
         successful_refunds: int,
         failed_refunds: int,
+        skipped_refunds: int,
         total_amount: float,
-        currency: str,
+        retry_attempts: int
     ):
         """Send a summary of refund processing."""
-        message = f"Refund processing completed: {successful_refunds} successful, {failed_refunds} failed"
+        message = "Refund processing completed:"
         details = {
             "Successful Refunds": successful_refunds,
             "Failed Refunds": failed_refunds,
-            "Total Refunded": (
-                f"{total_amount:.2f} {currency}" if successful_refunds > 0 else "0"
-            ),
+            "Skipped Refunds": skipped_refunds,
+            "Retry Attempts": retry_attempts,
+            "Total Refunded": (f"{total_amount:.2f}"),
             "Mode": "DRY-RUN" if DRY_RUN else "LIVE",
         }
 

@@ -1,7 +1,10 @@
 .truck/
 .vscode/
 .venv/
+.htmlcov/
 .env
 __pycache__
 */**/__pycache__/
 .logs/dev
+.coverage
+.pytest_cache

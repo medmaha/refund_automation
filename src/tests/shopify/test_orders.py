@@ -1,120 +1,40 @@
 from unittest.mock import patch
 
-from src.models.order import (
-    DeliverableTracking,
-    Deliverable,
-    LineItem,
-    MoneyBag,
-    MoneyBagSet,
-    OrderTransaction,
-    ReturnFulfillments,
-    ReverseDeliveries,
-    ReverseFulfillmentOrder,
-    ShopifyOrder,
-    TransactionKind,
-)
-from src.models.tracking import (
-    LatestStatus,
-    TrackInfo,
-    TrackingData,
-    TrackingStatus,
-    TrackingSubStatus,
-)
 from src.shopify.orders import __cleanup_shopify_orders as cleanup_shopify_orders
+<<<<<<< HEAD
 from src.shopify.orders import __fetch_tracking_details as fetch_tracking_details
 from src.shopify.orders import __generate_tracking_payload as generate_tracking_payload
 from src.shopify.orders import __get_order_by_tracking_id as get_order_by_tracking_id
 from src.shopify.orders import retrieve_refundable_shopify_orders
+=======
+from src.shopify.orders import (
+    retrieve_refundable_shopify_orders,
+)
+>>>>>>> stage
 
-TEST_TRACKING_NUMBER = "123456"
-
-
-def _create_order_with_tracking(tracking_number=None, carrier_name=None):
-    """Helper to create order with optional tracking info."""
-    money_set = MoneyBagSet(presentmentMoney=MoneyBag(amount=100.0))
-    
-    # Create tracking if provided
-    returns = []
-    if tracking_number or carrier_name:
-        tracking = DeliverableTracking(number=tracking_number, carrierName=carrier_name)
-        deliverable = Deliverable(tracking=tracking)
-        reverse_delivery = ReverseDeliveries(deliverable=deliverable)
-        rfo = ReverseFulfillmentOrder(reverseDeliveries=[reverse_delivery])
-        return_fulfillment = ReturnFulfillments(
-            id="return_1", name="Return 1", reverseFulfillmentOrders=[rfo]
-        )
-        returns = [return_fulfillment]
-    
-    return ShopifyOrder(
-        id="order_test", name="#TEST", tags=[], 
-        lineItems=[LineItem(id="li1", quantity=1, refundableQuantity=1)],
-        totalPriceSet=money_set,
-        transactions=[OrderTransaction(id="tx1", gateway="test", kind=TransactionKind.SALE, amountSet=money_set)],
-        returns=returns
-    )
+# trunk-ignore(ruff/F403)
+from src.tests.shopify.fixtures import *
 
 
-def _create_tracking_data(tracking_number, status=TrackingStatus.DELIVERED, sub_status=TrackingSubStatus.DELIVERED_OTHER):
-    """Helper to create minimal tracking data."""
-    latest_status = LatestStatus(status=status, sub_status=sub_status, sub_status_descr=None)
-    track_info = TrackInfo(latest_status=latest_status, latest_event=None, milestone=[])
-    return TrackingData(tag="test", number=tracking_number, carrier=7041, param=None, track_info=track_info)
+def test_cleanup_orders_success(dummy_order, dummy_orders_with_invalid_returns):
+    orders = [dummy_order, *dummy_orders_with_invalid_returns]
+    cleaned = cleanup_shopify_orders(orders.copy())
 
-
-# ----------------------
-# __get_order_by_tracking_id
-# ----------------------
-def test_get_order_by_tracking_id_found():
-    order_with_tracking = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
-    order_without_tracking = _create_order_with_tracking()
-    
-    found = get_order_by_tracking_id(
-        TEST_TRACKING_NUMBER, [order_with_tracking, order_without_tracking]
-    )
-    assert found is order_with_tracking
-
-
-def test_get_order_by_tracking_id_not_found():
-    order_with_tracking = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
-    order_without_tracking = _create_order_with_tracking()
-    
-    found = get_order_by_tracking_id(
-        "nonexistent", [order_with_tracking, order_without_tracking]
-    )
-    assert found is None
-
-
-# ----------------------
-# __generate_tracking_payload
-# ----------------------
-def test_generate_tracking_payload_valid():
-    order_with_tracking = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
-    order_without_tracking = _create_order_with_tracking()
-    
-    payload = generate_tracking_payload([order_with_tracking, order_without_tracking])
-    assert payload == [{"number": TEST_TRACKING_NUMBER, "carrier": 7041}]  # DHL Paket fallback
-
-
-def test_generate_tracking_payload_empty():
-    assert generate_tracking_payload([]) == []
-
-
-# ----------------------
-# __cleanup_shopify_orders
-# ----------------------
-def test_cleanup_shopify_orders_keeps_valid():
-    order = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
-    cleaned = cleanup_shopify_orders([order])
+    assert dummy_order in cleaned
     assert len(cleaned) == 1
-    assert cleaned[0].id == order.id
 
 
-def test_cleanup_shopify_orders_discards_invalid():
-    order = _create_order_with_tracking()  # No tracking - invalid
-    cleaned = cleanup_shopify_orders([order])
+def test_cleanup_orders_failure(dummy_order, dummy_orders_with_invalid_returns):
+    dummy_order.returns = []  # remove the return shipment
+
+    orders = [dummy_order, *dummy_orders_with_invalid_returns]
+    cleaned = cleanup_shopify_orders(orders.copy())
+
+    assert dummy_order not in cleaned
     assert len(cleaned) == 0
 
 
+<<<<<<< HEAD
 # ----------------------
 # __fetch_tracking_details
 # ----------------------
@@ -162,10 +82,25 @@ def test_retrieve_refundable_shopify_orders_success_e2e(
     _,
     mock_fetch_shopify_orders,
     mock_fetch_tracking_details,
+=======
+@patch("src.shopify.orders.__fetch_all_shopify_orders")
+@patch("src.shopify.orders.fetch_tracking_details")
+@patch("src.shopify.orders.register_orders_trackings")
+@patch("src.shopify.orders.slack_notifier")
+def test_retrieve_refundable_orders(
+    mock_slack,
+    mock_register,
+    mock_fetch_tracking,
+    mock_fetch_orders,
+    dummy_order,
+    dummy_tracking,
+>>>>>>> stage
 ):
-    order = _create_order_with_tracking(TEST_TRACKING_NUMBER, "DHL")
-    tracking = _create_tracking_data(TEST_TRACKING_NUMBER)
+    mock_fetch_orders.return_value = [dummy_order]
+    mock_fetch_tracking.return_value = [(dummy_order, dummy_tracking)]
+    mock_register.return_value = None
 
+<<<<<<< HEAD
     mock_fetch_tracking_details.return_value = [(order, tracking)]
 
     mock_fetch_shopify_orders.return_value = {
@@ -325,3 +260,10 @@ dummy_order_node_2 = {
     ],
     "returns": {"nodes": []},
 }
+=======
+    with patch("src.shopify.orders.time.sleep") as mock_sleep:
+        results = retrieve_refundable_shopify_orders()
+        assert len(results) == 1
+        assert results[0][0] == dummy_order
+        mock_sleep.assert_called_with(5)
+>>>>>>> stage

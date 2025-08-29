@@ -1,1 +1,37 @@
-{}
+{
+  "ee70ab977237f37b": {
+    "timestamp": "2025-08-18T07:23:20.959116-04:00",
+    "order_id": "gid://shopify/Order/6761296757048",
+    "operation": "refund",
+    "dry_run": true,
+    "result": {
+      "result_id": "gid://shopify/Refund/gid://shopify/Order/6761296757048-1755516200-dry-run-PARTIAL",
+      "results": {
+        "refund_type": "PARTIAL",
+        "total_refund_amount": 885.32,
+        "line_items_to_refund": [
+          {
+            "lineItemId": "gid://shopify/LineItem/17451492180280",
+            "quantity": 2
+          },
+          {
+            "lineItemId": "gid://shopify/LineItem/17451492213048",
+            "quantity": 1
+          }
+        ],
+        "transactions": [
+          {
+            "orderId": "gid://shopify/Order/6761296757048",
+            "parentId": "gid://shopify/OrderTransaction/8159429886264",
+            "kind": "REFUND",
+            "gateway": "manual",
+            "amount": 885.32
+          }
+        ],
+        "shipping_refund": 0.0,
+        "tax_refund": 115.47,
+        "discount_deduction": 0.0
+      }
+    }
+  }
+}

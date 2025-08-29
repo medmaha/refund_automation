@@ -1,0 +1,52 @@
+2025-08-18T11:23:10.701791+00:00 - __main__ - INFO - ================================= [Refund Automation | MODE=[DRY-RUN | ID=[03EED1D67A9E455A]]] =================================
+2025-08-18T11:23:10.988258+00:00 - src.utils.idempotency - WARNING - Failed to load idempotency cache: Expecting value: line 1 column 1 (char 0)
+2025-08-18T11:23:10.990452+00:00 - __main__ - INFO - System initialization | EXTRA: {"mode":"DRY-RUN","audit_stats":{"enabled":true,"log_dir":".audit_logs","current_log_file":".audit_logs\\dry_run.audit_2025-08-18.json","log_file_size_bytes":1083328,"total_entries":2981},"timezone_info":{"store_timezone":"America/New_York","current_utc":"2025-08-18T11:23:10.990452+00:00","current_store":"2025-08-18T07:23:10.990452-04:00","utc_offset":"-0400"},"idempotency_stats":{"total_entries":0,"dry_run_entries":0,"live_entries":0,"cache_file":".cache\\dry_run.idempotency.json","ttl_hours":24}}
+2025-08-18T11:23:10.990452+00:00 - src.shopify.refund - INFO - Starting refund automation in DRY_RUN mode | EXTRA: {"mode":"DRY_RUN","timezone_info":{"store_timezone":"America/New_York","current_utc":"2025-08-18T11:23:10.990452+00:00","current_store":"2025-08-18T07:23:10.990452-04:00","utc_offset":"-0400"}}
+2025-08-18T11:23:10.990452+00:00 - src.utils.slack - DEBUG - Slack notifications disabled, skipping
+2025-08-18T11:23:10.992666+00:00 - src.shopify.orders - INFO - Starting retrieval of fulfilled Shopify orders
+2025-08-18T11:23:10.992666+00:00 - src.shopify.orders - INFO - Starting retrieval of Shopify orders
+2025-08-18T11:23:10.992666+00:00 - src.shopify.orders - DEBUG - Requesting orders page with cursor: None
+2025-08-18T11:23:12.636276+00:00 - src.shopify.orders - INFO - Fetched 4 orders from Shopify
+2025-08-18T11:23:12.636276+00:00 - src.shopify.orders - INFO - Successfully fetched 4 total orders
+2025-08-18T11:23:12.636276+00:00 - src.shopify.orders - INFO - Processing 4 orders for tracking
+2025-08-18T11:23:12.636276+00:00 - src.utils.slack - DEBUG - Slack notifications disabled, skipping
+2025-08-18T11:23:12.636276+00:00 - src.shopify.orders - INFO - Cleaning up 4 Shopify orders
+2025-08-18T11:23:12.636276+00:00 - src.shopify.orders - DEBUG - Order gid://shopify/Order/6761296757048 added to cleaned orders
+2025-08-18T11:23:12.636276+00:00 - src.shopify.orders - INFO - Cleaned orders count: 1
+2025-08-18T11:23:12.636276+00:00 - src.shopify.orders - INFO - Cleaned orders: 1 eligible out of 4 total
+2025-08-18T11:23:12.636276+00:00 - src.utils.slack - DEBUG - Slack notifications disabled, skipping
+2025-08-18T11:23:12.636276+00:00 - src.shopify.orders - INFO - Generating tracking 1 orders
+2025-08-18T11:23:12.639919+00:00 - src.shopify.orders - DEBUG - Adding tracking number: 517983002106, carrier: 7041
+2025-08-18T11:23:12.639919+00:00 - src.shopify.orders - INFO - Generated tracking payload with 1 entries
+2025-08-18T11:23:12.639919+00:00 - src.shopify.orders - INFO - Registering 1 trackings in 1 segments
+2025-08-18T11:23:12.639919+00:00 - src.shopify.orders - DEBUG - Registering tracking segment 1/1 with 1 entries
+2025-08-18T11:23:14.574881+00:00 - src.shopify.orders - INFO - Segment 1: 0 registered, 0 rejected
+2025-08-18T11:23:14.574881+00:00 - src.shopify.orders - INFO - Total tracking registration results: 0 registered, 0 rejected
+2025-08-18T11:23:14.574881+00:00 - src.shopify.orders - INFO - Waiting 5 seconds for tracking registration to sync
+2025-08-18T11:23:19.588825+00:00 - src.shopify.orders - INFO - Fetching tracking details for 1 payload entries
+2025-08-18T11:23:20.955483+00:00 - src.shopify.orders - INFO - Received 1 tracking entries from API
+2025-08-18T11:23:20.955483+00:00 - src.shopify.orders - INFO - These tracking-numbers matches return criteria | EXTRA: {"status":"Delivered","sub_status":"Delivered_Other","payload":[["517983002106","#1009"]]}
+2025-08-18T11:23:20.955483+00:00 - src.utils.slack - DEBUG - Slack notifications disabled, skipping
+2025-08-18T11:23:20.955483+00:00 - src.shopify.orders - INFO - Tracking details processing complete: 1 matched, 0 errors out of 1 total | EXTRA: {"matched_orders":1,"parsing_errors":0,"processed_count":1,"success_rate":"100.0%"}
+2025-08-18T11:23:20.955483+00:00 - src.shopify.orders - INFO - Tracking processing complete: 1 matched trackings | EXTRA: {"total_orders":4,"eligible_orders":1,"matched_trackings":1}
+2025-08-18T11:23:20.959117+00:00 - src.shopify.orders - INFO - Order retrieval and tracking processing complete: 1 final results
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund - INFO - Processing 1 orders for potential refunds
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund - INFO - Processing order 1/1 - #1009 | EXTRA: {"progress":"1/1","order_id":"gid://shopify/Order/6761296757048","order_name":"#1009"}
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund - INFO - Initiating refund for order #1009 ($896.77 GMD) - mode: DRY_RUN | EXTRA: {"order_id":"gid://shopify/Order/6761296757048","order_name":"#1009","order_amount":896.77,"currency":"GMD","mode":"DRY_RUN","request_id":"a3ac883e","tracking_number":"517983002106","timestamp":"2025-08-18T07:23:20.959116-04:00"}
+2025-08-18T11:23:20.959117+00:00 - src.utils.timing_validator - INFO - Timing validation passed: 434.54h >= 120h | EXTRA: {"tracking_number":"517983002106","hours_since_delivery":434.53915531,"required_delay_hours":120}
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund_calculator - INFO - Calculating refund for order #1009
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund_calculator - INFO - Calculating partial refund for order #1009
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund_calculator - INFO - Calculating partial refund for order #1009
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund_calculator - DEBUG - Line item gid://shopify/LineItem/17451492180280: base=9.95, discount=0, net=9.95, qty=2, refund=19.90
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund_calculator - DEBUG - Line item gid://shopify/LineItem/17451492213048: base=749.95, discount=0, net=749.95, qty=1, refund=749.95
+2025-08-18T11:23:20.959117+00:00 - src.utils.idempotency - DEBUG - Generated idempotency key: ee70ab977237f37b for order: gid://shopify/Order/6761296757048
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund - INFO - Sending PARTIAL refund request to Shopify for order #1009 | EXTRA: {"order_id":"gid://shopify/Order/6761296757048","order_name":"#1009","mode":"DRY_RUN","request_id":"a3ac883e","refund_type":"PARTIAL","refund_amount":885.32,"transaction_count":1}
+2025-08-18T11:23:20.959117+00:00 - src.utils.slack - DEBUG - Slack notifications disabled, skipping
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund - INFO - Refund successfully processed for order #1009 | EXTRA: {"order_id":"gid://shopify/Order/6761296757048","order_name":"#1009","refund_id":"gid://shopify/Refund/gid://shopify/Order/6761296757048-1755516200-dry-run-PARTIAL","refund_amount":885.32,"currency":"GMD","request_id":"a3ac883e","decision_branch":"processed"}
+2025-08-18T11:23:20.959117+00:00 - src.utils.idempotency - DEBUG - Saved idempotency cache with 1 entries
+2025-08-18T11:23:20.959117+00:00 - src.utils.idempotency - INFO - Marked operation as completed for key: ee70ab977237f37b | EXTRA: {"idempotency_key":"ee70ab977237f37b","order_id":"gid://shopify/Order/6761296757048","operation":"refund","dry_run":true}
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund - INFO - Refund processed successfully | EXTRA: {"refund_id":"gid://shopify/Refund/gid://shopify/Order/6761296757048-1755516200-dry-run-PARTIAL","order_id":"gid://shopify/Order/6761296757048","order_name":"#1009"}
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund - INFO - Refund processing completed | EXTRA: {"successful_refunds":1,"failed_refunds":0,"skipped_refunds":0,"total_refunded_amount":"885.32","currency":"GMD","mode":"DRY_RUN"}
+2025-08-18T11:23:20.959117+00:00 - src.utils.slack - DEBUG - Slack notifications disabled, skipping
+2025-08-18T11:23:20.959117+00:00 - src.shopify.refund - DEBUG - Detailed refund results | EXTRA: {"refunded_orders":["gid://shopify/Refund/gid://shopify/Order/6761296757048-1755516200-dry-run-PARTIAL"]}
+2025-08-18T11:23:20.964339+00:00 - __main__ - INFO - ================================= [Refund Automation | MODE=[DRY-RUN | ID=[03EED1D67A9E455A]]] =================================
